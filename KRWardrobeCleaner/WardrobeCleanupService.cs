@@ -26,6 +26,7 @@ public sealed class WardrobeCleanupService
     public int Failed { get; private set; }
     public string Status { get; private set; } = "대기 중";
     public string? LastItemStatus { get; private set; }
+    public bool RescanRequested { get; private set; }
 
     public WardrobeCleanupService(
         DresserRestoreTester restoreTester,
@@ -53,6 +54,7 @@ public sealed class WardrobeCleanupService
         LastItemStatus = null;
         pendingAutoDeposit = false;
         rescanAt = 0;
+        RescanRequested = false;
         dresserClosedAt = 0;
 
         if (queue.Count == 0)
@@ -189,6 +191,7 @@ public sealed class WardrobeCleanupService
         {
             commands.ProcessCommand("/dungeondrip refresh");
             rescanAt = 0;
+            RescanRequested = true;
         }
 
         if (!pendingAutoDeposit)
@@ -223,6 +226,15 @@ public sealed class WardrobeCleanupService
 
         if (pendingAutoDeposit)
             Status += " · 환상의 옷장을 닫으면 장롱 보관을 이어서 실행합니다.";
+    }
+
+    public bool ConsumeRescanRequest()
+    {
+        if (!RescanRequested)
+            return false;
+
+        RescanRequested = false;
+        return true;
     }
 
     public void UpdateSettings(int intervalMs, int reserveSlots, bool autoDeposit)
