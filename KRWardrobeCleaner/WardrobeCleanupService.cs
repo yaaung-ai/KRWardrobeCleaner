@@ -99,6 +99,12 @@ public sealed class WardrobeCleanupService
 
     public bool DepositNow()
     {
+        if (!config.IncludeCraftingGearInArmoryPreclean)
+        {
+            Status = "제작직 장비 제외가 켜져 있어 AutoRetainer 자동 보관을 실행하지 않습니다. AutoRetainer는 장비칸까지 함께 처리할 수 있습니다.";
+            return false;
+        }
+
         if (IsRunning)
         {
             Status = "복원 작업이 끝난 뒤 추억의 보관함 보관을 실행해 주세요.";
@@ -221,7 +227,7 @@ public sealed class WardrobeCleanupService
         IsRunning = false;
         Status = $"복원 완료: {Restored}개 · 제외 {Skipped}개 · 실패 {Failed}개";
         rescanAt = now + 1500;
-        pendingAutoDeposit = config.AutoDepositToArmoire && Restored > 0;
+        pendingAutoDeposit = config.AutoDepositToArmoire && config.IncludeCraftingGearInArmoryPreclean && Restored > 0;
         dresserClosedAt = 0;
 
         if (pendingAutoDeposit)
