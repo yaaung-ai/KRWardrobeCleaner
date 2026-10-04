@@ -66,7 +66,7 @@ public sealed unsafe class ArmoryMoveSellService
 
     private readonly ExcelIndex excel;
     private readonly Configuration config;
-    private readonly Action saveConfig;
+    private readonly System.Action saveConfig;
     private readonly IDataManager data;
     private readonly IGameGui gameGui;
 
@@ -101,7 +101,7 @@ public sealed unsafe class ArmoryMoveSellService
     public ArmoryMoveSellService(
         ExcelIndex excel,
         Configuration config,
-        Action saveConfig,
+        System.Action saveConfig,
         IDataManager data,
         IGameGui gameGui)
     {
