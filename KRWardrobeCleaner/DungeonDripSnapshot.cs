@@ -30,7 +30,7 @@ public sealed class DungeonDripSnapshot
     {
         var path = FindNewestSnapshot(configuredPath);
         if (path is null)
-            return new ScanResult { Notes = ["Dungeon Drip ownership-*.json snapshot was not found."] };
+            return new ScanResult { Notes = ["Dungeon Drip 소유권 스냅샷(ownership-*.json)을 찾지 못했습니다."] };
 
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
         var root = doc.RootElement;
@@ -43,14 +43,14 @@ public sealed class DungeonDripSnapshot
             .Where(cabinet.Contains)
             .Where(id => !armoire.Contains(id))
             .OrderBy(id => excel.NameOf(id), StringComparer.CurrentCulture)
-            .Select(id => new Candidate(id, excel.NameOf(id), "DungeonDrip DresserDirect + Cabinet sheet"))
+            .Select(id => new Candidate(id, excel.NameOf(id), "Dungeon Drip 환상의 옷장 + 장롱 가능 목록"))
             .ToList();
 
         var notes = new List<string>();
         if (dresserDirect.Count == 0)
-            notes.Add("No DresserDirect item IDs were found. Open the Glamour Dresser, run /dungeondrip refresh, then rescan.");
+            notes.Add("환상의 옷장 아이템을 찾지 못했습니다. 환상의 옷장을 연 뒤 /dungeondrip refresh를 실행하고 다시 검색해 주세요.");
         if (dresserDirect.Count > 0 && candidates.Count == 0)
-            notes.Add("Dresser data was found, but no Armoire candidate was produced. Open the Armoire once, run /dungeondrip refresh, then rescan.");
+            notes.Add("환상의 옷장 데이터는 있지만 장롱 보관 후보가 없습니다. 장롱을 한 번 연 뒤 /dungeondrip refresh를 실행하고 다시 검색해 주세요.");
 
         return new ScanResult
         {
