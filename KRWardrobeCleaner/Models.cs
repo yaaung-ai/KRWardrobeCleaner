@@ -19,6 +19,14 @@ public sealed class ScanResult
     public int ArmoireCount { get; init; }
     public int CabinetEligibleCount { get; init; }
     public List<Candidate> Candidates { get; init; } = [];
+
+    // Raw Dungeon Drip ownership sets used by the general dresser cleanup stages.
+    // DresserDirectItems are pieces occupying an individual dresser slot.
+    // DresserOutfitPieces are pieces currently held inside a stored Outfit Glamour set.
+    public HashSet<uint> DresserDirectItems { get; init; } = [];
+    public HashSet<uint> DresserOutfitPieces { get; init; } = [];
+    public HashSet<uint> StoredOutfitIds { get; init; } = [];
+
     public List<string> DresserPaths { get; init; } = [];
     public List<string> ArmoirePaths { get; init; } = [];
     public List<string> Notes { get; init; } = [];

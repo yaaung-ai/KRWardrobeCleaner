@@ -28,6 +28,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly GlamourPlateFilter plateFilter;
     private readonly ArmoryMoveSellService armoryMoveSell;
     private readonly FinalDispositionService finalDisposition;
+    private readonly DresserUnusedService dresserUnused;
 
     private ScanResult scan = new();
     private PlateFilterResult plateResult = new([], 0, 0, 0, false);
@@ -50,6 +51,7 @@ public sealed class Plugin : IDalamudPlugin
         plateFilter = new GlamourPlateFilter();
         armoryMoveSell = new ArmoryMoveSellService(excel, config, SaveConfig, Data, GameGui);
         finalDisposition = new FinalDispositionService(excel, Data, GameGui, config);
+        dresserUnused = new DresserUnusedService(excel, restoreTester, config, Commands);
 
         Commands.AddHandler("/kwc", new CommandInfo(OnCommand)
         {
@@ -70,6 +72,7 @@ public sealed class Plugin : IDalamudPlugin
         cleanup.Stop("플러그인이 종료되어 환상의 옷장 정리를 중지했습니다.");
         armoryMoveSell.Stop();
         finalDisposition.Stop("플러그인이 종료되어 3단계 처리를 중지했습니다.");
+        dresserUnused.Stop("플러그인이 종료되어 4단계 복원을 중지했습니다.");
 
         Framework.Update -= OnFrameworkUpdate;
         PluginInterface.UiBuilder.Draw -= Draw;
@@ -87,6 +90,7 @@ public sealed class Plugin : IDalamudPlugin
         cleanup.Tick();
         armoryMoveSell.Tick();
         finalDisposition.Tick();
+        dresserUnused.Tick();
 
         if (cleanup.ConsumeRescanRequest())
         {
@@ -112,6 +116,7 @@ public sealed class Plugin : IDalamudPlugin
                 cleanup.Stop();
                 armoryMoveSell.Stop();
                 finalDisposition.Stop();
+                dresserUnused.Stop();
                 status = "진행 중인 자동 정리 작업을 중지했습니다.";
                 windowOpen = true;
                 break;
@@ -187,7 +192,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!windowOpen) return;
 
         ImGui.SetNextWindowSize(new Vector2(880, 900), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("히메짱 옷장 정리기 v0.6###KRWardrobeCleaner", ref windowOpen))
+        if (!ImGui.Begin("히메짱 옷장 정리기 v0.7###KRWardrobeCleaner", ref windowOpen))
         {
             ImGui.End();
             return;
@@ -203,6 +208,9 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Separator();
 
         DrawArmoryMoveSell();
+        ImGui.Separator();
+
+        DrawUnusedDresser();
         ImGui.Separator();
 
         DrawOptions();
@@ -335,7 +343,7 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawArmoryMoveSell()
     {
         ImGui.TextUnformatted("3단계 · 남은 장비 최종 정리");
-        ImGui.TextWrapped("장비함에서 추억의 보관함 대응 장비를 목록화합니다. 원하는 항목을 체크한 뒤 최종 목적지를 선택하세요: 추억의 보관함 / 상점 판매 / 세트화하여 환상의 옷장.");
+        ImGui.TextWrapped("장비함과 일반 인벤토리에서 추억의 보관함 대응 장비를 함께 검색합니다. 원하는 항목을 체크한 뒤 최종 목적지를 선택하세요: 추억의 보관함 / 상점 판매 / 세트화하여 환상의 옷장.");
 
         if (!armoryMoveSell.IsMoving && !armoryMoveSell.IsSelling && !finalDisposition.IsRunning)
         {
@@ -449,9 +457,13 @@ public sealed class Plugin : IDalamudPlugin
         {
             var selected = armoryMoveSell.Selected.Contains(entry.ItemId);
             var suffix = entry.AlreadyInArmoire ? " [보관함 보유]" : " [보관함 미보유]";
+            suffix += entry.InInventory ? " [인벤토리]" : " [장비함]";
             if (entry.IsCraftingGear) suffix += " [제작직]";
             if (entry.InGearset) suffix += " [장비 세트]";
-            if (entry.HasModifiedState) suffix += " [개별 상태 있음]";
+            if (entry.IsDyed) suffix += " [염색]";
+            if (entry.IsGlamoured) suffix += " [투영]";
+            if (entry.HasMateria) suffix += " [마테리아]";
+            if (entry.HasModifiedState && !entry.IsDyed && !entry.IsGlamoured && !entry.HasMateria) suffix += " [기타 개별 상태]";
             if (ImGui.Checkbox($"{entry.Name}{suffix}##manage{entry.ItemId}", ref selected))
                 armoryMoveSell.SetSelected(entry.ItemId, selected);
         }
@@ -459,6 +471,65 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.TextWrapped("추억의 보관함/세트화는 염색·마테리아·투영 등 개별 상태가 있는 장비를 자동으로 건너뜁니다. 상점 판매는 되돌릴 수 없으며, 일반 상점의 구매/판매 창을 연 상태에서 실행합니다.");
         ImGui.TextWrapped("세트화는 체크 항목 중 같은 '의상 투영' 세트에 속하는 장비가 2개 이상일 때만 실행합니다. 환상의 옷장을 연 상태여야 합니다.");
+    }
+
+    private void DrawUnusedDresser()
+    {
+        ImGui.TextUnformatted("4단계 · 미사용 환상의 옷장 아이템 꺼내기");
+        ImGui.TextWrapped("환상의 옷장에 개별 보관된 아이템 중 의상 투영 세트에 들어 있지 않고, 현재 어떤 투영세트에서도 사용하지 않는 항목만 표시합니다. 체크한 항목은 인벤토리로만 복원합니다.");
+
+        if (!dresserUnused.IsRunning)
+        {
+            if (ImGui.Button("4단계 후보 검색"))
+            {
+                dresserUnused.Scan(scan);
+                status = dresserUnused.Status;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("4단계 전체 선택"))
+                dresserUnused.SelectAll(true);
+
+            ImGui.SameLine();
+            if (ImGui.Button("4단계 전체 해제"))
+                dresserUnused.SelectAll(false);
+
+            if (ImGui.Button($"체크 항목 인벤토리로 이동 ({dresserUnused.Selected.Count}개)"))
+            {
+                if (!cleanup.IsRunning && !armoryPreclean.IsRunning && !armoryMoveSell.IsMoving && !armoryMoveSell.IsSelling && !finalDisposition.IsRunning)
+                {
+                    dresserUnused.Start();
+                    status = dresserUnused.Status;
+                }
+                else
+                {
+                    status = "다른 정리 작업이 진행 중입니다.";
+                }
+            }
+        }
+        else
+        {
+            ImGui.TextUnformatted($"4단계 진행: 복원 {dresserUnused.Restored} · 제외 {dresserUnused.Skipped} · 실패 {dresserUnused.Failed}");
+            if (ImGui.Button("4단계 중지"))
+            {
+                dresserUnused.Stop();
+                status = dresserUnused.Status;
+            }
+        }
+
+        ImGui.TextWrapped($"상태: {dresserUnused.Status}");
+        if (!string.IsNullOrWhiteSpace(dresserUnused.LastItemStatus))
+            ImGui.TextWrapped($"최근 처리: {dresserUnused.LastItemStatus}");
+
+        ImGui.BeginChild("UnusedDresserList", new Vector2(0, 260), true);
+        foreach (var entry in dresserUnused.Entries)
+        {
+            var selected = dresserUnused.Selected.Contains(entry.ItemId);
+            var suffix = entry.IsDyed ? " [염색]" : "";
+            if (ImGui.Checkbox($"{entry.Name}{suffix}##dresserunused{entry.ItemId}", ref selected))
+                dresserUnused.SetSelected(entry.ItemId, selected);
+        }
+        ImGui.EndChild();
     }
 
     private void DrawOptions()
