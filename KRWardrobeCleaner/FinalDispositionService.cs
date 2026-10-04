@@ -5,6 +5,7 @@ using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using Lumina.Excel;
 using Lumina.Excel.Sheets;
 
 namespace KRWardrobeCleaner;
@@ -508,7 +509,7 @@ public sealed unsafe class FinalDispositionService
 
     private void BuildOutfitIndex()
     {
-        var sheet = data.GetExcelSheet<MirageStoreSetItem>();
+        var sheet = data.GetExcelSheet<RawRow>(name: "MirageStoreSetItem");
         if (sheet == null)
             return;
 
@@ -517,11 +518,16 @@ public sealed unsafe class FinalDispositionService
             if (row.RowId == 0)
                 continue;
 
-            var itemIds = row.Items
-                .Select(x => x.RowId)
-                .Where(x => x != 0)
-                .Take(OutfitSlotCount)
-                .ToList();
+            var itemIds = new List<uint>(OutfitSlotCount);
+            for (var i = 0; i < OutfitSlotCount; i++)
+            {
+                uint itemId;
+                try { itemId = (uint)row.ReadColumn(2 + i); }
+                catch { itemId = 0; }
+
+                if (itemId != 0)
+                    itemIds.Add(itemId);
+            }
 
             if (itemIds.Count < 2)
                 continue;
