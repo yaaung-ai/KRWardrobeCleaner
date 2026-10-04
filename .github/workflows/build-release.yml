@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main, v0.2-single-restore, v0.3-korean-cleanup ]
+    branches: [ main, v0.3-korean-cleanup ]
     paths:
       - "KRWardrobeCleaner/**"
       - "repo.json"
@@ -101,7 +101,7 @@ jobs:
       - name: Build summary
         shell: pwsh
         run: |
-          Add-Content $env:GITHUB_STEP_SUMMARY "## KR Wardrobe Cleaner ${{ steps.package.outputs.version }}"
+          Add-Content $env:GITHUB_STEP_SUMMARY "## 한국판 옷장 정리기 ${{ steps.package.outputs.version }}"
           Add-Content $env:GITHUB_STEP_SUMMARY "- DLL SHA-256: ${{ steps.package.outputs.dll_sha256 }}"
           Add-Content $env:GITHUB_STEP_SUMMARY "- ZIP SHA-256: ${{ steps.package.outputs.zip_sha256 }}"
           Add-Content $env:GITHUB_STEP_SUMMARY "- Custom repo: https://raw.githubusercontent.com/yaaung-ai/KRWardrobeCleaner/main/repo.json"
