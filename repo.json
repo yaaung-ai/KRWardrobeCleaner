@@ -1,12 +1,12 @@
 [
   {
     "Author": "yaaung-ai",
-    "Name": "KR Wardrobe Cleaner",
-    "Punchline": "KR-client Glamour Dresser cleanup helper and calibration recorder.",
-    "Description": "Reads Dungeon Drip snapshots, lists Glamour Dresser items that are eligible for the Armoire, records KR-client dresser UI events for safe automation calibration, and exports diagnostics. v0.2 can restore exactly one selected, undyed Armoire candidate as a guarded field test; it does not batch-restore items.",
+    "Name": "한국판 옷장 정리기",
+    "Punchline": "한국판 환상의 옷장을 장롱 기준으로 자동 정리합니다.",
+    "Description": "Dungeon Drip 스냅샷을 읽어 장롱에 보관 가능한 환상의 옷장 아이템을 찾고, 염색/중복 안전 검사를 거쳐 순차 복원합니다. 선택적으로 AutoRetainer 장롱 보관과 연동할 수 있습니다.",
     "InternalName": "KRWardrobeCleaner",
-    "AssemblyVersion": "0.2.0.0",
-    "TestingAssemblyVersion": "0.2.0.0",
+    "AssemblyVersion": "0.3.0.0",
+    "TestingAssemblyVersion": "0.3.0.0",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
     "TestingDalamudApiLevel": 15,
@@ -14,6 +14,11 @@
     "DownloadLinkInstall": "https://github.com/yaaung-ai/KRWardrobeCleaner/releases/latest/download/KRWardrobeCleaner.zip",
     "DownloadLinkUpdate": "https://github.com/yaaung-ai/KRWardrobeCleaner/releases/latest/download/KRWardrobeCleaner.zip",
     "DownloadLinkTesting": "https://github.com/yaaung-ai/KRWardrobeCleaner/releases/latest/download/KRWardrobeCleaner.zip",
-    "Tags": ["glamour", "inventory", "armoire", "utility"]
+    "Tags": [
+      "환상의 옷장",
+      "장롱",
+      "인벤토리",
+      "정리"
+    ]
   }
 ]
