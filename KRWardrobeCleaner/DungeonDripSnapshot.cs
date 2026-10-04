@@ -33,80 +33,57 @@ public sealed class DungeonDripSnapshot
             return new ScanResult { Notes = ["Dungeon Drip ownership-*.json snapshot was not found."] };
 
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
-        var dresser = new HashSet<uint>();
-        var armoire = new HashSet<uint>();
-        var dresserPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var armoirePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(doc.RootElement, "$", false, false, dresser, armoire, dresserPaths, armoirePaths);
+        var root = doc.RootElement;
+        var dresserDirect = ReadUIntArray(root, "DresserDirect");
+        var armoire = ReadUIntArray(root, "Armoire");
+        var slotsUsed = ReadInt(root, "DresserSlotsUsed");
 
         var cabinet = excel.CabinetItems;
-        var candidates = dresser
+        var candidates = dresserDirect
             .Where(cabinet.Contains)
             .Where(id => !armoire.Contains(id))
             .OrderBy(id => excel.NameOf(id), StringComparer.CurrentCulture)
-            .Select(id => new Candidate(id, excel.NameOf(id), "DungeonDrip snapshot + Cabinet sheet"))
+            .Select(id => new Candidate(id, excel.NameOf(id), "DungeonDrip DresserDirect + Cabinet sheet"))
             .ToList();
 
         var notes = new List<string>();
-        if (dresser.Count == 0)
-            notes.Add("No dresser item IDs were discovered. Send the ownership-*.json file so the parser can be matched to this Dungeon Drip version.");
-        if (dresser.Count > 0 && candidates.Count == 0)
+        if (dresserDirect.Count == 0)
+            notes.Add("No DresserDirect item IDs were found. Open the Glamour Dresser, run /dungeondrip refresh, then rescan.");
+        if (dresserDirect.Count > 0 && candidates.Count == 0)
             notes.Add("Dresser data was found, but no Armoire candidate was produced. Open the Armoire once, run /dungeondrip refresh, then rescan.");
 
         return new ScanResult
         {
             SnapshotPath = path,
-            DresserCount = dresser.Count,
+            DresserCount = slotsUsed >= 0 ? slotsUsed : dresserDirect.Count,
             ArmoireCount = armoire.Count,
             CabinetEligibleCount = cabinet.Count,
             Candidates = candidates,
-            DresserPaths = dresserPaths.Order().ToList(),
-            ArmoirePaths = armoirePaths.Order().ToList(),
+            DresserPaths = root.TryGetProperty("DresserDirect", out _) ? ["$.DresserDirect"] : [],
+            ArmoirePaths = root.TryGetProperty("Armoire", out _) ? ["$.Armoire"] : [],
             Notes = notes,
         };
     }
 
-    private void Walk(
-        JsonElement e,
-        string path,
-        bool inDresser,
-        bool inArmoire,
-        HashSet<uint> dresser,
-        HashSet<uint> armoire,
-        HashSet<string> dresserPaths,
-        HashSet<string> armoirePaths)
+    private static HashSet<uint> ReadUIntArray(JsonElement root, string propertyName)
     {
-        switch (e.ValueKind)
-        {
-            case JsonValueKind.Object:
-                foreach (var prop in e.EnumerateObject())
-                {
-                    var n = prop.Name;
-                    var d = inDresser || ContainsAny(n, "dresser", "prismbox", "prism_box", "mirageprism");
-                    var a = inArmoire || ContainsAny(n, "armoire", "cabinet");
-                    var p = path + "." + n;
-                    if (!inDresser && d) dresserPaths.Add(p);
-                    if (!inArmoire && a) armoirePaths.Add(p);
-                    Walk(prop.Value, p, d, a, dresser, armoire, dresserPaths, armoirePaths);
-                }
-                break;
+        var result = new HashSet<uint>();
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Array)
+            return result;
 
-            case JsonValueKind.Array:
-                var i = 0;
-                foreach (var child in e.EnumerateArray())
-                    Walk(child, $"{path}[{i++}]", inDresser, inArmoire, dresser, armoire, dresserPaths, armoirePaths);
-                break;
+        foreach (var value in element.EnumerateArray())
+            if (value.TryGetUInt32(out var id) && id != 0)
+                result.Add(id);
 
-            case JsonValueKind.Number:
-                if (!e.TryGetUInt32(out var id) || id == 0 || !excel.ValidItems.Contains(id)) return;
-                if (inDresser) dresser.Add(id);
-                if (inArmoire) armoire.Add(id);
-                break;
-        }
+        return result;
     }
 
-    private static bool ContainsAny(string value, params string[] terms)
-        => terms.Any(t => value.Contains(t, StringComparison.OrdinalIgnoreCase));
+    private static int ReadInt(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) || !element.TryGetInt32(out var value))
+            return -1;
+        return value;
+    }
 
     private static IEnumerable<string> SafeEnumerate(string root, string pattern)
     {
