@@ -45,21 +45,29 @@ jobs:
           $version = [string]$project.Project.PropertyGroup.Version
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=v$version" >> $env:GITHUB_OUTPUT
-          $out = ".\KRWardrobeCleaner\bin\x64\Release\KRWardrobeCleaner"
-          if (-not (Test-Path $out)) {
-            Write-Host "Expected packager output was not found. Listing build tree:"
+
+          $root = ".\KRWardrobeCleaner\bin\Release"
+          $dll = Get-ChildItem $root -Recurse -File -Filter "KRWardrobeCleaner.dll" | Select-Object -First 1
+          $manifest = Get-ChildItem $root -Recurse -File -Filter "KRWardrobeCleaner.json" | Select-Object -First 1
+
+          if ($null -eq $dll) {
             Get-ChildItem ".\KRWardrobeCleaner\bin" -Recurse | Select-Object FullName
-            throw "Dalamud packager output directory not found: $out"
+            throw "KRWardrobeCleaner.dll not found after successful build."
           }
-          $dll = Join-Path $out "KRWardrobeCleaner.dll"
-          $manifest = Join-Path $out "KRWardrobeCleaner.json"
-          if (-not (Test-Path $dll)) { throw "KRWardrobeCleaner.dll not found." }
-          if (-not (Test-Path $manifest)) { throw "KRWardrobeCleaner.json not found." }
-          Compress-Archive -Path "$out\*" -DestinationPath ".\KRWardrobeCleaner.zip" -Force
-          $dllHash = (Get-FileHash $dll -Algorithm SHA256).Hash
+          if ($null -eq $manifest) {
+            Get-ChildItem ".\KRWardrobeCleaner\bin" -Recurse | Select-Object FullName
+            throw "KRWardrobeCleaner.json not found after successful build."
+          }
+
+          New-Item -ItemType Directory -Force -Path ".\package" | Out-Null
+          Copy-Item $dll.FullName ".\package\KRWardrobeCleaner.dll" -Force
+          Copy-Item $manifest.FullName ".\package\KRWardrobeCleaner.json" -Force
+          Compress-Archive -Path ".\package\*" -DestinationPath ".\KRWardrobeCleaner.zip" -Force
+
+          $dllHash = (Get-FileHash ".\package\KRWardrobeCleaner.dll" -Algorithm SHA256).Hash
           $zipHash = (Get-FileHash ".\KRWardrobeCleaner.zip" -Algorithm SHA256).Hash
           Set-Content ".\SHA256SUMS.txt" "KRWardrobeCleaner.dll  $dllHash`nKRWardrobeCleaner.zip  $zipHash"
-          Copy-Item $dll ".\KRWardrobeCleaner.dll" -Force
+          Copy-Item ".\package\KRWardrobeCleaner.dll" ".\KRWardrobeCleaner.dll" -Force
           "dll_sha256=$dllHash" >> $env:GITHUB_OUTPUT
           "zip_sha256=$zipHash" >> $env:GITHUB_OUTPUT
 
