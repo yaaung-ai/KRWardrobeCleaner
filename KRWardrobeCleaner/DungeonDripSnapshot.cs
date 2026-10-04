@@ -43,14 +43,14 @@ public sealed class DungeonDripSnapshot
             .Where(cabinet.Contains)
             .Where(id => !armoire.Contains(id))
             .OrderBy(id => excel.NameOf(id), StringComparer.CurrentCulture)
-            .Select(id => new Candidate(id, excel.NameOf(id), "Dungeon Drip 환상의 옷장 + 장롱 가능 목록"))
+            .Select(id => new Candidate(id, excel.NameOf(id), "Dungeon Drip 환상의 옷장 + 추억의 보관함 가능 목록"))
             .ToList();
 
         var notes = new List<string>();
         if (dresserDirect.Count == 0)
             notes.Add("환상의 옷장 아이템을 찾지 못했습니다. 환상의 옷장을 연 뒤 /dungeondrip refresh를 실행하고 다시 검색해 주세요.");
         if (dresserDirect.Count > 0 && candidates.Count == 0)
-            notes.Add("환상의 옷장 데이터는 있지만 장롱 보관 후보가 없습니다. 장롱을 한 번 연 뒤 /dungeondrip refresh를 실행하고 다시 검색해 주세요.");
+            notes.Add("환상의 옷장 데이터는 있지만 추억의 보관함 보관 후보가 없습니다. 추억의 보관함을 한 번 연 뒤 /dungeondrip refresh를 실행하고 다시 검색해 주세요.");
 
         return new ScanResult
         {

@@ -59,7 +59,7 @@ public sealed class WardrobeCleanupService
 
         if (queue.Count == 0)
         {
-            Status = "정리할 장롱 후보가 없습니다.";
+            Status = "정리할 추억의 보관함 후보가 없습니다.";
             return false;
         }
 
@@ -99,26 +99,32 @@ public sealed class WardrobeCleanupService
 
     public bool DepositNow()
     {
+        if (!config.IncludeCraftingGearInArmoryPreclean)
+        {
+            Status = "제작직 장비 제외가 켜져 있어 AutoRetainer 자동 보관을 실행하지 않습니다. AutoRetainer는 장비칸까지 함께 처리할 수 있습니다.";
+            return false;
+        }
+
         if (IsRunning)
         {
-            Status = "복원 작업이 끝난 뒤 장롱 보관을 실행해 주세요.";
+            Status = "복원 작업이 끝난 뒤 추억의 보관함 보관을 실행해 주세요.";
             return false;
         }
 
         if (restoreTester.IsDresserOpen())
         {
-            Status = "환상의 옷장을 닫은 뒤 장롱 보관을 실행해 주세요.";
+            Status = "환상의 옷장을 닫은 뒤 추억의 보관함 보관을 실행해 주세요.";
             return false;
         }
 
         if (!commands.Commands.ContainsKey("/autoretainer"))
         {
-            Status = "AutoRetainer를 찾지 못했습니다. 장롱에 직접 보관해 주세요.";
+            Status = "AutoRetainer를 찾지 못했습니다. 추억의 보관함에 직접 보관해 주세요.";
             return false;
         }
 
         var ok = commands.ProcessCommand("/autoretainer armoire");
-        Status = ok ? "AutoRetainer에 장롱 보관 작업을 전달했습니다." : "AutoRetainer가 장롱 보관 명령을 받지 못했습니다.";
+        Status = ok ? "AutoRetainer에 추억의 보관함 보관 작업을 전달했습니다." : "AutoRetainer가 추억의 보관함 보관 명령을 받지 못했습니다.";
         pendingAutoDeposit = false;
         return ok;
     }
@@ -153,7 +159,7 @@ public sealed class WardrobeCleanupService
 
             if (free <= config.ReserveFreeSlots)
             {
-                Stop($"가방 빈칸이 {free}칸 남아 안전을 위해 중지했습니다. 복원된 아이템을 장롱에 보관한 뒤 다시 시작하세요.");
+                Stop($"가방 빈칸이 {free}칸 남아 안전을 위해 중지했습니다. 복원된 아이템을 추억의 보관함에 보관한 뒤 다시 시작하세요.");
                 return;
             }
 
@@ -200,7 +206,7 @@ public sealed class WardrobeCleanupService
         if (restoreTester.IsDresserOpen())
         {
             dresserClosedAt = 0;
-            Status = "복원이 끝났습니다. 환상의 옷장을 닫으면 AutoRetainer 장롱 보관을 시작합니다.";
+            Status = "복원이 끝났습니다. 환상의 옷장을 닫으면 AutoRetainer 추억의 보관함 보관을 시작합니다.";
             return;
         }
 
@@ -221,11 +227,11 @@ public sealed class WardrobeCleanupService
         IsRunning = false;
         Status = $"복원 완료: {Restored}개 · 제외 {Skipped}개 · 실패 {Failed}개";
         rescanAt = now + 1500;
-        pendingAutoDeposit = config.AutoDepositToArmoire && Restored > 0;
+        pendingAutoDeposit = config.AutoDepositToArmoire && config.IncludeCraftingGearInArmoryPreclean && Restored > 0;
         dresserClosedAt = 0;
 
         if (pendingAutoDeposit)
-            Status += " · 환상의 옷장을 닫으면 장롱 보관을 이어서 실행합니다.";
+            Status += " · 환상의 옷장을 닫으면 추억의 보관함 보관을 이어서 실행합니다.";
     }
 
     public bool ConsumeRescanRequest()

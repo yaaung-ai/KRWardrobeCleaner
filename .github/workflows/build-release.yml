@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main, v0.3-korean-cleanup ]
+    branches: [ main, v0.4-armory-preclean ]
     paths:
       - "KRWardrobeCleaner/**"
       - "repo.json"
@@ -93,7 +93,7 @@ jobs:
         run: |
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --title "한국판 옷장 정리기 $env:VERSION" --notes "장롱 보관 가능 아이템을 안전 검사 후 순차 복원하는 v0.3입니다. 염색/중복 대상은 제외하며, 선택적으로 AutoRetainer 장롱 보관과 연동할 수 있습니다."
+            gh release create $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --title "한국판 옷장 정리기 $env:VERSION" --notes "v0.4는 장비칸의 추억의 보관함 가능 장비를 먼저 안전 보관한 뒤 환상의 옷장을 정리합니다. 제작직 전용 장비 포함 여부를 선택할 수 있고, 장비 세트/염색/마테리아/투영/중복 장비는 보호합니다."
           } else {
             gh release upload $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --clobber
           }
