@@ -10,7 +10,7 @@ public sealed class WardrobeCleanupService
     private readonly Configuration config;
     private readonly Action saveConfig;
 
-    private readonly List<Candidate> queue = [];
+    private readonly List<DresserCleanupItem> queue = [];
     private int index;
     private long nextActionAt;
     private long rescanAt;
@@ -41,6 +41,9 @@ public sealed class WardrobeCleanupService
     }
 
     public bool Start(IEnumerable<Candidate> candidates)
+        => Start(candidates.Select(c => new DresserCleanupItem(c, false, false, false)));
+
+    public bool Start(IEnumerable<DresserCleanupItem> candidates)
     {
         if (IsRunning)
             return false;
@@ -163,8 +166,8 @@ public sealed class WardrobeCleanupService
                 return;
             }
 
-            var candidate = queue[index];
-            var result = restoreTester.RestoreOne(candidate);
+            var queued = queue[index];
+            var result = restoreTester.RestoreOne(queued.Candidate, queued.AllowDyedSource);
             LastItemStatus = result.Message;
 
             if (result.Success)
