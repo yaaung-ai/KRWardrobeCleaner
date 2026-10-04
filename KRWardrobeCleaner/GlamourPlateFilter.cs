@@ -2,8 +2,14 @@ using FFXIVClientStructs.FFXIV.Client.Game;
 
 namespace KRWardrobeCleaner;
 
+public sealed record DresserCleanupItem(
+    Candidate Candidate,
+    bool UsedOnPlate,
+    bool SourceDyed,
+    bool AllowDyedSource);
+
 public sealed record PlateFilterResult(
-    List<Candidate> Eligible,
+    List<DresserCleanupItem> Eligible,
     int NotUsedOnPlates,
     int UsedUndyed,
     int ProtectedDyed,
@@ -17,7 +23,7 @@ public sealed unsafe class GlamourPlateFilter
         if (manager == null || !manager->PrismBoxLoaded || !manager->GlamourPlatesLoaded)
             return new([], 0, 0, 0, false);
 
-        var eligible = new List<Candidate>();
+        var eligible = new List<DresserCleanupItem>();
         var notUsed = 0;
         var usedUndyed = 0;
         var protectedDyed = 0;
@@ -25,7 +31,7 @@ public sealed unsafe class GlamourPlateFilter
         foreach (var candidate in candidates)
         {
             var used = false;
-            var hasDyedUse = false;
+            var plateDyed = false;
 
             foreach (var plate in manager->GlamourPlates)
             {
@@ -37,26 +43,30 @@ public sealed unsafe class GlamourPlateFilter
 
                     used = true;
                     if (plate.Stain0Ids[slot] != 0 || plate.Stain1Ids[slot] != 0)
-                        hasDyedUse = true;
+                        plateDyed = true;
                 }
             }
 
-            // A dresser item's own stain can be the effective appearance even when a plate has
-            // no additional dye stored. If the item is used by a plate, treat the source stain
-            // as protected too.
-            if (used && !hasDyedUse && TryFindDresserSlot(manager, candidate.ItemId, out var dresserSlot))
-            {
-                if (manager->PrismBoxStain0Ids[dresserSlot] != 0 || manager->PrismBoxStain1Ids[dresserSlot] != 0)
-                    hasDyedUse = true;
-            }
+            var sourceDyed = false;
+            if (TryFindDresserSlot(manager, candidate.ItemId, out var dresserSlot))
+                sourceDyed = manager->PrismBoxStain0Ids[dresserSlot] != 0 || manager->PrismBoxStain1Ids[dresserSlot] != 0;
 
-            if (hasDyedUse)
+            // 투영세트에서 사용 중이라면, 투영세트 자체의 염색뿐 아니라 환상의 옷장 원본의
+            // 염색도 실제 외형에 영향을 줄 수 있으므로 둘 중 하나라도 염색이면 보호한다.
+            if (used && (plateDyed || sourceDyed))
             {
                 protectedDyed++;
                 continue;
             }
 
-            eligible.Add(candidate);
+            // 사용하지 않는 아이템은 사용자의 조건상 정리 대상이다. 원본 염색이 있다면
+            // 추억의 보관함 이동 과정에서 색이 사라질 수 있음을 UI에 표시한다.
+            eligible.Add(new(
+                candidate,
+                UsedOnPlate: used,
+                SourceDyed: sourceDyed,
+                AllowDyedSource: !used));
+
             if (used) usedUndyed++;
             else notUsed++;
         }
