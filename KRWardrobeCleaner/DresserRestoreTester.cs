@@ -38,7 +38,7 @@ public sealed unsafe class DresserRestoreTester
         return inventory == null ? -1 : checked((int)inventory->GetEmptySlotsInBag());
     }
 
-    public RestoreTestResult RestoreOne(Candidate candidate)
+    public RestoreTestResult RestoreOne(Candidate candidate, bool allowDyedSource = false)
     {
         if (!IsDresserOpen())
             return new(RestoreResultKind.DresserClosed, "환상의 옷장이 열려 있지 않습니다.");
@@ -75,7 +75,7 @@ public sealed unsafe class DresserRestoreTester
 
         var stain0 = manager->PrismBoxStain0Ids[match];
         var stain1 = manager->PrismBoxStain1Ids[match];
-        if (stain0 != 0 || stain1 != 0)
+        if (!allowDyedSource && (stain0 != 0 || stain1 != 0))
             return new(RestoreResultKind.Dyed, $"{candidate.Name}: 염색된 아이템이라 건너뜁니다. ({stain0}/{stain1})", match);
 
         var restored = manager->RestorePrismBoxItem((uint)match);
