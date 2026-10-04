@@ -20,6 +20,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly DungeonDripSnapshot snapshots;
     private readonly CalibrationRecorder recorder;
     private readonly DiagnosticExporter exporter;
+    private readonly DresserRestoreTester restoreTester;
 
     private ScanResult scan = new();
     private bool windowOpen = true;
@@ -34,6 +35,7 @@ public sealed class Plugin : IDalamudPlugin
         recorder = new CalibrationRecorder(AgentLifecycle, Log);
         recorder.SetEnabled(config.CalibrationMode);
         exporter = new DiagnosticExporter(PluginInterface);
+        restoreTester = new DresserRestoreTester();
 
         Commands.AddHandler("/kwc", new CommandInfo(OnCommand)
         {
@@ -120,15 +122,15 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (!windowOpen) return;
 
-        ImGui.SetNextWindowSize(new Vector2(720, 640), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("KR Wardrobe Cleaner v0.1###KRWardrobeCleaner", ref windowOpen))
+        ImGui.SetNextWindowSize(new Vector2(760, 680), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("KR Wardrobe Cleaner v0.2 TEST###KRWardrobeCleaner", ref windowOpen))
         {
             ImGui.End();
             return;
         }
 
-        ImGui.TextUnformatted("Phase 1: candidate scan + KR event calibration");
-        ImGui.TextWrapped("This build does not batch-restore dresser items yet. It identifies Armoire candidates from Dungeon Drip and records the KR-client restore event.");
+        ImGui.TextUnformatted("v0.2 field test: one selected item only");
+        ImGui.TextWrapped("This build can restore exactly one selected, undyed Armoire candidate from the live Glamour Dresser. It does not batch-restore.");
         ImGui.Separator();
 
         if (ImGui.Button("Rescan Dungeon Drip")) Rescan();
@@ -178,6 +180,28 @@ public sealed class Plugin : IDalamudPlugin
             {
                 Log.Error(ex, "[KWC] Diagnostic export failed");
                 status = "Export failed: " + ex.Message;
+            }
+        }
+
+        if (selectedIndex >= 0 && selectedIndex < scan.Candidates.Count)
+        {
+            var candidate = scan.Candidates[selectedIndex];
+            ImGui.Separator();
+            ImGui.TextWrapped($"Selected: {candidate.Name} [{candidate.ItemId}]");
+            ImGui.TextWrapped("Safety: this test restores one selected item only, refuses ambiguous duplicate matches, and refuses dyed items.");
+            if (ImGui.Button($"TEST restore ONE selected item##restore{candidate.ItemId}"))
+            {
+                var result = restoreTester.RestoreOne(candidate);
+                status = result.Message;
+                if (result.Success)
+                {
+                    Chat.Print("[KWC] " + result.Message);
+                    Commands.ProcessCommand("/dungeondrip refresh");
+                }
+                else
+                {
+                    Chat.PrintError("[KWC] " + result.Message);
+                }
             }
         }
 
