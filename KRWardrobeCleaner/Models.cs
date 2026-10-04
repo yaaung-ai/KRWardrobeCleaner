@@ -1,6 +1,6 @@
 namespace KRWardrobeCleaner;
 
-public sealed record Candidate(uint ItemId, string Name, string Source);
+public sealed record Candidate(uint ItemId, string Name, string Source, bool AlreadyInArmoire = false);
 public sealed record TraceValue(string Type, string? Value);
 
 public sealed record AgentTrace(
