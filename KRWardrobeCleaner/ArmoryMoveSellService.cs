@@ -16,7 +16,11 @@ public sealed record ArmoryManageEntry(
     bool IsCraftingGear,
     bool AlreadyInArmoire,
     bool InGearset,
-    bool HasModifiedState);
+    bool HasModifiedState,
+    bool InInventory,
+    bool IsDyed,
+    bool IsGlamoured,
+    bool HasMateria);
 
 public sealed unsafe class ArmoryMoveSellService
 {
@@ -141,7 +145,7 @@ public sealed unsafe class ArmoryMoveSellService
         var cabinet = UIState.Instance();
         var seen = new HashSet<uint>();
 
-        foreach (var type in ArmoryContainers)
+        foreach (var type in BagContainers.Concat(ArmoryContainers))
         {
             var container = inventory->GetInventoryContainer(type);
             if (container == null || !container->IsLoaded)
@@ -168,6 +172,9 @@ public sealed unsafe class ArmoryMoveSellService
                 }
 
                 var inGearset = gearsetItems.Contains(itemId);
+                var dyed = slot->Stains[0] != 0 || slot->Stains[1] != 0;
+                var glamoured = slot->GlamourId != 0;
+                var materia = HasMateria(slot);
                 var modified = !IsPlainItem(slot);
 
                 if (inGearset)
@@ -191,12 +198,16 @@ public sealed unsafe class ArmoryMoveSellService
                     crafting,
                     alreadyStored,
                     inGearset,
-                    modified));
+                    modified,
+                    BagContainers.Contains(type),
+                    dyed,
+                    glamoured,
+                    materia));
             }
         }
 
         entries.Sort((a, b) => StringComparer.CurrentCulture.Compare(a.Name, b.Name));
-        Status = $"장비함 후보 검색 완료: {entries.Count}개. 장비 세트/염색/마테리아/투영 상태가 있어도 인벤토리 이동 후보에는 표시합니다.";
+        Status = $"3단계 후보 검색 완료: {entries.Count}개. 장비함과 일반 인벤토리를 함께 검색했습니다.";
         return entries.Count;
     }
 
@@ -233,9 +244,10 @@ public sealed unsafe class ArmoryMoveSellService
             return false;
         }
 
-        if (CountFreeBagSlots(inventory) < ids.Count)
+        var needMove = entries.Count(x => selected.Contains(x.ItemId) && !x.InInventory);
+        if (CountFreeBagSlots(inventory) < needMove)
         {
-            Status = $"가방 빈칸이 부족합니다. 필요 {ids.Count}칸 / 현재 {CountFreeBagSlots(inventory)}칸.";
+            Status = $"가방 빈칸이 부족합니다. 실제 이동 필요 {needMove}칸 / 현재 {CountFreeBagSlots(inventory)}칸.";
             return false;
         }
 
@@ -331,6 +343,14 @@ public sealed unsafe class ArmoryMoveSellService
         {
             Stop();
             Status = "인벤토리 데이터를 잃어 작업을 중지했습니다.";
+            return;
+        }
+
+        if (FindBagItem(itemId, out _, out _))
+        {
+            Skipped++;
+            LastItemStatus = $"{excel.NameOf(itemId)}: 이미 인벤토리에 있습니다.";
+            AdvanceMove(now);
             return;
         }
 
@@ -458,6 +478,14 @@ public sealed unsafe class ArmoryMoveSellService
         Status = $"상점 판매 중 {workIndex}/{workQueue.Count} · 판매 {Sold} · 제외 {Skipped} · 실패 {Failed}";
     }
 
+    private static bool HasMateria(InventoryItem* item)
+    {
+        for (var i = 0; i < item->Materia.Length; i++)
+            if (item->Materia[i] != 0)
+                return true;
+        return false;
+    }
+
     private static bool IsPlainItem(InventoryItem* item)
     {
         if (item == null) return false;
@@ -466,8 +494,7 @@ public sealed unsafe class ArmoryMoveSellService
         if (item->GlamourId != 0) return false;
         if (item->Stains[0] != 0 || item->Stains[1] != 0) return false;
         if ((item->Flags & InventoryItem.ItemFlags.CompanyCrestApplied) != 0) return false;
-        for (var i = 0; i < item->Materia.Length; i++)
-            if (item->Materia[i] != 0) return false;
+        if (HasMateria(item)) return false;
         return true;
     }
 
