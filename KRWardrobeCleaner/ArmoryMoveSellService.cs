@@ -14,7 +14,9 @@ public sealed record ArmoryManageEntry(
     uint ItemId,
     string Name,
     bool IsCraftingGear,
-    bool AlreadyInArmoire);
+    bool AlreadyInArmoire,
+    bool InGearset,
+    bool HasModifiedState);
 
 public sealed unsafe class ArmoryMoveSellService
 {
@@ -164,11 +166,13 @@ public sealed unsafe class ArmoryMoveSellService
                     continue;
                 }
 
-                if (gearsetItems.Contains(itemId))
-                {
+                var inGearset = gearsetItems.Contains(itemId);
+                var modified = !IsPlainItem(slot);
+
+                if (inGearset)
                     SkippedGearset++;
-                    continue;
-                }
+                if (modified)
+                    SkippedModified++;
 
                 if (CountPhysicalCopies(inventory, itemId) != 1)
                 {
@@ -176,22 +180,22 @@ public sealed unsafe class ArmoryMoveSellService
                     continue;
                 }
 
-                if (!IsPlainItem(slot))
-                {
-                    SkippedModified++;
-                    continue;
-                }
-
                 var alreadyStored = cabinet != null &&
                                     cabinet->Cabinet.IsCabinetLoaded() &&
                                     cabinet->Cabinet.IsItemInCabinet(cabinetRow);
 
-                entries.Add(new(itemId, excel.NameOf(itemId), crafting, alreadyStored));
+                entries.Add(new(
+                    itemId,
+                    excel.NameOf(itemId),
+                    crafting,
+                    alreadyStored,
+                    inGearset,
+                    modified));
             }
         }
 
         entries.Sort((a, b) => StringComparer.CurrentCulture.Compare(a.Name, b.Name));
-        Status = $"장비함 후보 검색 완료: {entries.Count}개.";
+        Status = $"장비함 후보 검색 완료: {entries.Count}개. 장비 세트/염색/마테리아/투영 상태가 있어도 인벤토리 이동 후보에는 표시합니다.";
         return entries.Count;
     }
 
@@ -337,10 +341,10 @@ public sealed unsafe class ArmoryMoveSellService
             return;
         }
 
-        if (!IsPlainItem(item) || CountPhysicalCopies(inventory, itemId) != 1)
+        if (CountPhysicalCopies(inventory, itemId) != 1)
         {
             Skipped++;
-            LastItemStatus = $"{excel.NameOf(itemId)}: 안전 조건이 바뀌어 건너뜁니다.";
+            LastItemStatus = $"{excel.NameOf(itemId)}: 동일 아이템이 여러 개라 이동 대상을 특정할 수 없어 건너뜁니다.";
             AdvanceMove(now);
             return;
         }

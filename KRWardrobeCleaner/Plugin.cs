@@ -153,9 +153,11 @@ public sealed class Plugin : IDalamudPlugin
 
             if (updateStatus)
             {
+                var already = scan.Candidates.Count(x => x.AlreadyInArmoire);
+                var newStore = scan.Candidates.Count - already;
                 status = plateResult.PlateDataReady
-                    ? $"검색 완료: 기본 후보 {scan.Candidates.Count}개, 투영세트 기준 정리 가능 {plateResult.Eligible.Count}개."
-                    : $"검색 완료: 기본 후보 {scan.Candidates.Count}개. 투영세트 정보는 환상의 옷장을 연 뒤 다시 분석해 주세요.";
+                    ? $"검색 완료: 보관함 대응 {scan.Candidates.Count}개 (이미 등록 {already} / 신규 {newStore}), 투영세트 기준 정리 가능 {plateResult.Eligible.Count}개."
+                    : $"검색 완료: 보관함 대응 {scan.Candidates.Count}개 (이미 등록 {already} / 신규 {newStore}). 투영세트 정보는 환상의 옷장을 연 뒤 다시 분석해 주세요.";
             }
         }
         catch (Exception ex)
@@ -180,7 +182,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!windowOpen) return;
 
         ImGui.SetNextWindowSize(new Vector2(880, 900), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("히메짱 옷장 정리기 v0.5###KRWardrobeCleaner", ref windowOpen))
+        if (!ImGui.Begin("히메짱 옷장 정리기 v0.5.1###KRWardrobeCleaner", ref windowOpen))
         {
             ImGui.End();
             return;
@@ -279,8 +281,10 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextWrapped($"상태: {displayedStatus}");
 
         var freeSlots = restoreTester.GetFreeBagSlots();
+        var alreadyInArmoire = scan.Candidates.Count(x => x.AlreadyInArmoire);
+        var notYetInArmoire = scan.Candidates.Count - alreadyInArmoire;
         ImGui.TextUnformatted(
-            $"환상의 옷장 사용: {scan.DresserCount} | 보관함 기록: {scan.ArmoireCount} | 기본 후보: {scan.Candidates.Count} | 가방 빈칸: {(freeSlots < 0 ? "확인 불가" : freeSlots)}");
+            $"환상의 옷장 사용: {scan.DresserCount} | 보관함 기록: {scan.ArmoireCount} | 보관함 대응: {scan.Candidates.Count} (이미 등록 {alreadyInArmoire} / 신규 {notYetInArmoire}) | 가방 빈칸: {(freeSlots < 0 ? "확인 불가" : freeSlots)}");
 
         foreach (var note in scan.Notes)
             ImGui.TextWrapped("안내: " + note);
@@ -386,7 +390,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!string.IsNullOrWhiteSpace(armoryMoveSell.LastItemStatus))
             ImGui.TextWrapped($"최근 처리: {armoryMoveSell.LastItemStatus}");
 
-        ImGui.TextWrapped($"검색 제외: 제작직 {armoryMoveSell.SkippedCrafting} · 장비 세트 {armoryMoveSell.SkippedGearset} · 개별 상태 {armoryMoveSell.SkippedModified} · 중복 {armoryMoveSell.SkippedDuplicate}");
+        ImGui.TextWrapped($"검색 상태: 제작직 제외 {armoryMoveSell.SkippedCrafting} · 장비 세트 표시 {armoryMoveSell.SkippedGearset} · 개별 상태 표시 {armoryMoveSell.SkippedModified} · 중복 제외 {armoryMoveSell.SkippedDuplicate}");
 
         ImGui.BeginChild("ArmoryMoveSellList", new Vector2(0, 220), true);
         foreach (var entry in armoryMoveSell.Entries)
@@ -394,6 +398,8 @@ public sealed class Plugin : IDalamudPlugin
             var selected = armoryMoveSell.Selected.Contains(entry.ItemId);
             var suffix = entry.AlreadyInArmoire ? " [보관함 보유]" : " [보관함 미보유]";
             if (entry.IsCraftingGear) suffix += " [제작직]";
+            if (entry.InGearset) suffix += " [장비 세트]";
+            if (entry.HasModifiedState) suffix += " [개별 상태 있음]";
             if (ImGui.Checkbox($"{entry.Name}{suffix}##manage{entry.ItemId}", ref selected))
                 armoryMoveSell.SetSelected(entry.ItemId, selected);
         }
@@ -479,6 +485,8 @@ public sealed class Plugin : IDalamudPlugin
             {
                 var candidate = item.Candidate;
                 var reason = item.UsedOnPlate ? " [투영세트 사용/무염색]" : " [투영세트 미사용]";
+                if (candidate.AlreadyInArmoire) reason += " [보관함 등록됨]";
+                else reason += " [보관함 미등록]";
                 if (item.SourceDyed) reason += " [원본 염색 있음]";
                 var label = config.ShowIds
                     ? $"{candidate.Name} [{candidate.ItemId}]{reason}"
