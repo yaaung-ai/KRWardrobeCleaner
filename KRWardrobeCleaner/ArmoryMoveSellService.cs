@@ -85,6 +85,7 @@ public sealed unsafe class ArmoryMoveSellService
 
     public IReadOnlyList<ArmoryManageEntry> Entries => entries;
     public IReadOnlySet<uint> Selected => selected;
+    public IReadOnlyList<ArmoryManageEntry> SelectedEntries => entries.Where(x => selected.Contains(x.ItemId)).ToList();
 
     public bool IsMoving { get; private set; }
     public bool IsSelling { get; private set; }
