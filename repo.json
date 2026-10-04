@@ -1,0 +1,19 @@
+[
+  {
+    "Author": "yaaung-ai",
+    "Name": "KR Wardrobe Cleaner",
+    "Punchline": "KR-client Glamour Dresser cleanup helper and calibration recorder.",
+    "Description": "Reads Dungeon Drip snapshots, lists Glamour Dresser items that are eligible for the Armoire, records KR-client dresser UI events for safe automation calibration, and exports diagnostics. v0.1 does not batch-restore items.",
+    "InternalName": "KRWardrobeCleaner",
+    "AssemblyVersion": "0.1.0.0",
+    "TestingAssemblyVersion": "0.1.0.0",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 15,
+    "TestingDalamudApiLevel": 15,
+    "RepoUrl": "https://github.com/yaaung-ai/KRWardrobeCleaner",
+    "DownloadLinkInstall": "https://github.com/yaaung-ai/KRWardrobeCleaner/releases/latest/download/KRWardrobeCleaner.zip",
+    "DownloadLinkUpdate": "https://github.com/yaaung-ai/KRWardrobeCleaner/releases/latest/download/KRWardrobeCleaner.zip",
+    "DownloadLinkTesting": "https://github.com/yaaung-ai/KRWardrobeCleaner/releases/latest/download/KRWardrobeCleaner.zip",
+    "Tags": ["glamour", "inventory", "armoire", "utility"]
+  }
+]
