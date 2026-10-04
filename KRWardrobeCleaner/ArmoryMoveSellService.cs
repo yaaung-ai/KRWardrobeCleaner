@@ -18,6 +18,7 @@ public sealed record ArmoryManageEntry(
     bool InGearset,
     bool HasModifiedState,
     bool InInventory,
+    bool CanStoreInArmoire,
     bool IsDyed,
     bool IsGlamoured,
     bool HasMateria);
@@ -161,9 +162,10 @@ public sealed unsafe class ArmoryMoveSellService
                 if (itemId == 0 || !seen.Add(itemId))
                     continue;
 
-                if (!excel.TryGetCabinetRow(itemId, out var cabinetRow))
+                if (!excel.IsEquipment(itemId))
                     continue;
 
+                var canStoreInArmoire = excel.TryGetCabinetRow(itemId, out var cabinetRow);
                 var crafting = excel.IsCraftingOnly(itemId);
                 if (crafting && !config.IncludeCraftingGearInArmoryMove)
                 {
@@ -188,7 +190,8 @@ public sealed unsafe class ArmoryMoveSellService
                     continue;
                 }
 
-                var alreadyStored = cabinet != null &&
+                var alreadyStored = canStoreInArmoire &&
+                                    cabinet != null &&
                                     cabinet->Cabinet.IsCabinetLoaded() &&
                                     cabinet->Cabinet.IsItemInCabinet(cabinetRow);
 
@@ -200,6 +203,7 @@ public sealed unsafe class ArmoryMoveSellService
                     inGearset,
                     modified,
                     BagContainers.Contains(type),
+                    canStoreInArmoire,
                     dyed,
                     glamoured,
                     materia));
@@ -207,7 +211,7 @@ public sealed unsafe class ArmoryMoveSellService
         }
 
         entries.Sort((a, b) => StringComparer.CurrentCulture.Compare(a.Name, b.Name));
-        Status = $"3단계 후보 검색 완료: {entries.Count}개. 장비함과 일반 인벤토리를 함께 검색했습니다.";
+        Status = $"3단계 후보 검색 완료: {entries.Count}개. 장비함과 일반 인벤토리의 장비를 함께 검색했습니다.";
         return entries.Count;
     }
 

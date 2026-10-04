@@ -25,6 +25,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly DresserRestoreTester restoreTester;
     private readonly WardrobeCleanupService cleanup;
     private readonly ArmoryArmoireService armoryPreclean;
+    private readonly GlamourStateCache glamourCache;
     private readonly GlamourPlateFilter plateFilter;
     private readonly ArmoryMoveSellService armoryMoveSell;
     private readonly FinalDispositionService finalDisposition;
@@ -48,10 +49,11 @@ public sealed class Plugin : IDalamudPlugin
         restoreTester = new DresserRestoreTester(GameGui);
         cleanup = new WardrobeCleanupService(restoreTester, Commands, config, SaveConfig);
         armoryPreclean = new ArmoryArmoireService(excel, config, SaveConfig);
-        plateFilter = new GlamourPlateFilter();
+        glamourCache = new GlamourStateCache();
+        plateFilter = new GlamourPlateFilter(glamourCache);
         armoryMoveSell = new ArmoryMoveSellService(excel, config, SaveConfig, Data, GameGui);
         finalDisposition = new FinalDispositionService(excel, Data, GameGui, config);
-        dresserUnused = new DresserUnusedService(excel, restoreTester, config, Commands);
+        dresserUnused = new DresserUnusedService(excel, restoreTester, config, Commands, glamourCache);
 
         Commands.AddHandler("/kwc", new CommandInfo(OnCommand)
         {
@@ -86,6 +88,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        glamourCache.Observe();
         armoryPreclean.Tick();
         cleanup.Tick();
         armoryMoveSell.Tick();
@@ -167,7 +170,7 @@ public sealed class Plugin : IDalamudPlugin
                 var newStore = scan.Candidates.Count - already;
                 status = plateResult.PlateDataReady
                     ? $"검색 완료: 보관함 대응 {scan.Candidates.Count}개 (이미 등록 {already} / 신규 {newStore}), 투영세트 기준 정리 가능 {plateResult.Eligible.Count}개."
-                    : $"검색 완료: 보관함 대응 {scan.Candidates.Count}개 (이미 등록 {already} / 신규 {newStore}). 투영세트 정보는 환상의 옷장을 연 뒤 다시 분석해 주세요.";
+                    : $"검색 완료: 보관함 대응 {scan.Candidates.Count}개 (이미 등록 {already} / 신규 {newStore}). 환상의 옷장과 투영세트 편집 화면을 각각 한 번 열면 캐시된 두 데이터를 함께 분석합니다.";
             }
         }
         catch (Exception ex)
@@ -182,7 +185,7 @@ public sealed class Plugin : IDalamudPlugin
         plateResult = plateFilter.Filter(scan.Candidates);
         status = plateResult.PlateDataReady
             ? $"투영세트 분석 완료: 미사용 {plateResult.NotUsedOnPlates} · 사용 중 무염색 {plateResult.UsedUndyed} · 염색 보호 {plateResult.ProtectedDyed}."
-            : "투영세트 데이터를 아직 읽을 수 없습니다. 환상의 옷장을 열어 둔 상태에서 다시 시도해 주세요.";
+            : "투영세트/환상의 옷장 캐시가 아직 준비되지 않았습니다. 두 화면을 각각 한 번 열어 데이터를 읽힌 뒤 다시 시도해 주세요.";
     }
 
     private void SaveConfig() => PluginInterface.SavePluginConfig(config);
@@ -192,7 +195,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!windowOpen) return;
 
         ImGui.SetNextWindowSize(new Vector2(880, 900), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("히메짱 옷장 정리기 v0.7###KRWardrobeCleaner", ref windowOpen))
+        if (!ImGui.Begin("히메짱 옷장 정리기 v0.7.1###KRWardrobeCleaner", ref windowOpen))
         {
             ImGui.End();
             return;
@@ -225,7 +228,7 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawArmoryPreclean()
     {
         ImGui.TextUnformatted("1단계 · 장비함 → 추억의 보관함");
-        ImGui.TextWrapped("추억의 보관함을 직접 연 상태에서 실행합니다. 저장된 장비 세트, 염색/마테리아/투영 등 개별 상태가 있는 장비, 중복 장비는 건너뜁니다.");
+        ImGui.TextWrapped("추억의 보관함을 직접 연 상태에서 실행합니다. 저장된 장비 세트와 중복 장비는 건너뛰지만, 염색/마테리아/투영 등 개별 상태가 있는 장비는 후보에서 제외하지 않습니다.");
 
         if (!armoryPreclean.IsRunning)
         {
@@ -236,7 +239,7 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             ImGui.SameLine();
-            if (ImGui.Button($"안전 후보 보관 시작 ({armoryPreclean.Candidates.Count}개)##precleanstart"))
+            if (ImGui.Button($"후보 보관 시작 ({armoryPreclean.Candidates.Count}개)##precleanstart"))
             {
                 if (!cleanup.IsRunning && !armoryMoveSell.IsMoving && !armoryMoveSell.IsSelling)
                 {
@@ -260,7 +263,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ImGui.TextWrapped($"상태: {armoryPreclean.Status}");
-        ImGui.TextWrapped($"검색 제외: 제작직 {armoryPreclean.SkippedCrafting} · 장비 세트 {armoryPreclean.SkippedGearset} · 개별 상태 {armoryPreclean.SkippedModified} · 중복 {armoryPreclean.SkippedDuplicate}");
+        ImGui.TextWrapped($"검색 상태: 제작직 제외 {armoryPreclean.SkippedCrafting} · 장비 세트 제외 {armoryPreclean.SkippedGearset} · 개별 상태 표시 {armoryPreclean.SkippedModified} · 중복 제외 {armoryPreclean.SkippedDuplicate}");
     }
 
     private void DrawPlateAwareDresserCleanup()
@@ -343,7 +346,7 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawArmoryMoveSell()
     {
         ImGui.TextUnformatted("3단계 · 남은 장비 최종 정리");
-        ImGui.TextWrapped("장비함과 일반 인벤토리에서 추억의 보관함 대응 장비를 함께 검색합니다. 원하는 항목을 체크한 뒤 최종 목적지를 선택하세요: 추억의 보관함 / 상점 판매 / 세트화하여 환상의 옷장.");
+        ImGui.TextWrapped("장비함과 일반 인벤토리의 장비를 함께 검색합니다. 추억의 보관함 대응 여부와 개별 상태를 표시하고, 원하는 항목을 체크한 뒤 최종 목적지를 선택하세요: 추억의 보관함 / 상점 판매 / 세트화하여 환상의 옷장.");
 
         if (!armoryMoveSell.IsMoving && !armoryMoveSell.IsSelling && !finalDisposition.IsRunning)
         {
@@ -456,7 +459,9 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var entry in armoryMoveSell.Entries)
         {
             var selected = armoryMoveSell.Selected.Contains(entry.ItemId);
-            var suffix = entry.AlreadyInArmoire ? " [보관함 보유]" : " [보관함 미보유]";
+            var suffix = entry.CanStoreInArmoire
+                ? (entry.AlreadyInArmoire ? " [보관함 보유]" : " [보관함 미보유]")
+                : " [보관함 비대상]";
             suffix += entry.InInventory ? " [인벤토리]" : " [장비함]";
             if (entry.IsCraftingGear) suffix += " [제작직]";
             if (entry.InGearset) suffix += " [장비 세트]";
@@ -469,7 +474,7 @@ public sealed class Plugin : IDalamudPlugin
         }
         ImGui.EndChild();
 
-        ImGui.TextWrapped("추억의 보관함/세트화는 염색·마테리아·투영 등 개별 상태가 있는 장비를 자동으로 건너뜁니다. 상점 판매는 되돌릴 수 없으며, 일반 상점의 구매/판매 창을 연 상태에서 실행합니다.");
+        ImGui.TextWrapped("염색·마테리아·투영 등 개별 상태는 목록에 표시만 하며, 추억의 보관함/세트화에서도 자동 제외하지 않습니다. 해당 목적지에서 처리할 수 없는 장비는 게임 요청이 거절되면 실패로 표시됩니다. 상점 판매는 일반 상점의 구매/판매 창을 연 상태에서 실행합니다.");
         ImGui.TextWrapped("세트화는 체크 항목 중 같은 '의상 투영' 세트에 속하는 장비가 2개 이상일 때만 실행합니다. 환상의 옷장을 연 상태여야 합니다.");
     }
 
@@ -477,6 +482,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         ImGui.TextUnformatted("4단계 · 미사용 환상의 옷장 아이템 꺼내기");
         ImGui.TextWrapped("환상의 옷장에 개별 보관된 아이템 중 의상 투영 세트에 들어 있지 않고, 현재 어떤 투영세트에서도 사용하지 않는 항목만 표시합니다. 체크한 항목은 인벤토리로만 복원합니다.");
+        ImGui.TextWrapped($"데이터 캐시: 환상의 옷장 {(glamourCache.HasDresserData ? $"{glamourCache.DresserItemCount}종" : "대기")} · 투영세트 {(glamourCache.HasPlateData ? $"{glamourCache.PlateItemCount}종" : "대기")}. 두 화면을 동시에 열 필요는 없습니다.");
 
         if (!dresserUnused.IsRunning)
         {

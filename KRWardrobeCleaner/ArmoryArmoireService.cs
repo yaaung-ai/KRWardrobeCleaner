@@ -151,8 +151,8 @@ public sealed unsafe class ArmoryArmoireService
                     continue;
                 }
 
-                // 추억의 보관함은 외형/염색/마테리아 등의 개별 상태를 보존하지 않으므로
-                // 자동 정리에서는 수정된 장비를 건드리지 않는다.
+                // 개별 상태는 후보에서 제외하지 않는다. 염색/마테리아/투영/내구도 등은
+                // 진단용으로 집계만 하고, 실제 보관 가능 여부는 게임의 요청 결과에 맡긴다.
                 if (slot->GetConditionPercentage() != 100 ||
                     slot->SpiritbondOrCollectability != 0 ||
                     slot->GlamourId != 0 ||
@@ -162,7 +162,6 @@ public sealed unsafe class ArmoryArmoireService
                     (slot->Flags & InventoryItem.ItemFlags.CompanyCrestApplied) != 0)
                 {
                     SkippedModified++;
-                    continue;
                 }
 
                 candidates.Add(new(itemId, excel.NameOf(itemId), isCrafting, cabinetRowId));
@@ -170,7 +169,7 @@ public sealed unsafe class ArmoryArmoireService
         }
 
         candidates.Sort((a, b) => StringComparer.CurrentCulture.Compare(a.Name, b.Name));
-        Status = $"장비칸 검색 완료: 안전 보관 후보 {candidates.Count}개.";
+        Status = $"장비칸 검색 완료: 보관 후보 {candidates.Count}개.";
         return candidates.Count;
     }
 
@@ -251,21 +250,6 @@ public sealed unsafe class ArmoryArmoireService
         {
             Skipped++;
             LastItemStatus = $"{candidate.Name}: 장비 위치가 바뀌었거나 중복이 생겨 건너뜁니다.";
-            index++;
-            nextActionAt = now + Math.Clamp(config.ArmoryStoreIntervalMs, 300, 3000);
-            return;
-        }
-
-        if (live->GetConditionPercentage() != 100 ||
-            live->SpiritbondOrCollectability != 0 ||
-            live->GlamourId != 0 ||
-            live->Stains[0] != 0 ||
-            live->Stains[1] != 0 ||
-            HasMateria(live) ||
-            (live->Flags & InventoryItem.ItemFlags.CompanyCrestApplied) != 0)
-        {
-            Skipped++;
-            LastItemStatus = $"{candidate.Name}: 장비 상태가 변경되어 건너뜁니다.";
             index++;
             nextActionAt = now + Math.Clamp(config.ArmoryStoreIntervalMs, 300, 3000);
             return;

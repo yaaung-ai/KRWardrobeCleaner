@@ -14,6 +14,7 @@ public sealed class ExcelIndex
     private HashSet<uint>? validItems;
     private Dictionary<uint, uint>? cabinetRows;
     private HashSet<uint>? craftingOnlyItems;
+    private HashSet<uint>? equipmentItems;
 
     public ExcelIndex(IDataManager data) => this.data = data;
 
@@ -22,10 +23,12 @@ public sealed class ExcelIndex
     public IReadOnlyDictionary<uint, uint> CabinetRows => cabinetRows ??= BuildCabinetRows();
     public IReadOnlySet<uint> CabinetItems => CabinetRows.Keys.ToHashSet();
     public IReadOnlySet<uint> CraftingOnlyItems => craftingOnlyItems ??= BuildCraftingOnlyItems();
+    public IReadOnlySet<uint> EquipmentItems => equipmentItems ??= BuildEquipmentItems();
 
     public string NameOf(uint id) => Names.TryGetValue(id, out var n) && !string.IsNullOrWhiteSpace(n) ? n : $"아이템 #{id}";
     public bool TryGetCabinetRow(uint itemId, out uint rowId) => CabinetRows.TryGetValue(itemId, out rowId);
     public bool IsCraftingOnly(uint itemId) => CraftingOnlyItems.Contains(itemId);
+    public bool IsEquipment(uint itemId) => EquipmentItems.Contains(itemId);
 
     private IEnumerable GetSheet(string rowTypeName)
     {
@@ -74,6 +77,26 @@ public sealed class ExcelIndex
             if (itemId != 0)
                 result[itemId] = cabinetRowId;
         }
+        return result;
+    }
+
+    private HashSet<uint> BuildEquipmentItems()
+    {
+        var result = new HashSet<uint>();
+        foreach (var row in GetSheet("Item"))
+        {
+            if (row is null) continue;
+            var itemId = ReadRowId(row);
+            if (itemId == 0) continue;
+
+            var equipProp = row.GetType().GetProperty("EquipSlotCategory");
+            var equipRef = equipProp?.GetValue(row);
+            if (equipRef is null) continue;
+
+            if (ReadRowId(equipRef) != 0)
+                result.Add(itemId);
+        }
+
         return result;
     }
 
