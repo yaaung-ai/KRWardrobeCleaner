@@ -15,6 +15,7 @@ public sealed unsafe class DresserUnusedService
     private readonly DresserRestoreTester restoreTester;
     private readonly Configuration config;
     private readonly ICommandManager commands;
+    private readonly GlamourStateCache glamourCache;
 
     private readonly List<DresserUnusedEntry> entries = [];
     private readonly HashSet<uint> selected = [];
@@ -35,12 +36,14 @@ public sealed unsafe class DresserUnusedService
         ExcelIndex excel,
         DresserRestoreTester restoreTester,
         Configuration config,
-        ICommandManager commands)
+        ICommandManager commands,
+        GlamourStateCache glamourCache)
     {
         this.excel = excel;
         this.restoreTester = restoreTester;
         this.config = config;
         this.commands = commands;
+        this.glamourCache = glamourCache;
     }
 
     public int Scan(ScanResult scan)
@@ -51,22 +54,19 @@ public sealed unsafe class DresserUnusedService
         entries.Clear();
         selected.Clear();
 
+        glamourCache.Observe();
+
         var manager = MirageManager.Instance();
-        if (manager == null || !manager->PrismBoxLoaded || !manager->GlamourPlatesLoaded)
+        if (manager == null || !manager->PrismBoxLoaded)
         {
-            Status = "환상의 옷장과 투영세트 데이터를 읽을 수 없습니다. 환상의 옷장을 연 상태에서 다시 시도해 주세요.";
+            Status = "환상의 옷장 데이터를 읽을 수 없습니다. 환상의 옷장을 연 상태에서 다시 시도해 주세요.";
             return 0;
         }
 
-        var usedOnPlates = new HashSet<uint>();
-        foreach (var plate in manager->GlamourPlates)
+        if (!glamourCache.TryGetUsedOnPlates(out var usedOnPlates))
         {
-            foreach (var raw in plate.ItemIds)
-            {
-                var id = NormalizeItemId(raw);
-                if (id != 0)
-                    usedOnPlates.Add(id);
-            }
+            Status = "투영세트 데이터가 아직 캐시되지 않았습니다. 투영세트 편집 화면을 한 번 열었다가 환상의 옷장으로 돌아온 뒤 다시 검색해 주세요.";
+            return 0;
         }
 
         foreach (var itemId in scan.DresserDirectItems.OrderBy(excel.NameOf, StringComparer.CurrentCulture))
@@ -83,7 +83,7 @@ public sealed unsafe class DresserUnusedService
             entries.Add(new(itemId, excel.NameOf(itemId), dyed));
         }
 
-        Status = $"4단계 후보 검색 완료: 세트화/투영세트 미사용 직접 보관 아이템 {entries.Count}개.";
+        Status = $"4단계 후보 검색 완료: 세트화/투영세트 미사용 직접 보관 아이템 {entries.Count}개. (투영세트 캐시 {glamourCache.PlateItemCount}종)";
         return entries.Count;
     }
 
