@@ -93,7 +93,7 @@ jobs:
         run: |
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --title "KR Wardrobe Cleaner $env:VERSION" --notes "Calibration release for the Korean FFXIV client. v0.1 scans Dungeon Drip snapshots and records restore UI events; it does not batch-restore items."
+            gh release create $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --title "한국판 옷장 정리기 $env:VERSION" --notes "장롱 보관 가능 아이템을 안전 검사 후 순차 복원하는 v0.3입니다. 염색/중복 대상은 제외하며, 선택적으로 AutoRetainer 장롱 보관과 연동할 수 있습니다."
           } else {
             gh release upload $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --clobber
           }
