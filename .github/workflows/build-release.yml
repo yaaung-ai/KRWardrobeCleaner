@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main, v0.5.1-candidate-fix ]
+    branches: [ main, v0.6-final-actions ]
     paths:
       - "KRWardrobeCleaner/**"
       - "repo.json"
