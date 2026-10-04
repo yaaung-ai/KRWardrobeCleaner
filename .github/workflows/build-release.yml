@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main, v0.5-himechan-organizer ]
+    branches: [ main, v0.5.1-candidate-fix ]
     paths:
       - "KRWardrobeCleaner/**"
       - "repo.json"
