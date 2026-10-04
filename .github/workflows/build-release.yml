@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main, v0.2-single-restore ]
+    branches: [ main, v0.2-single-restore, v0.3-korean-cleanup ]
     paths:
       - "KRWardrobeCleaner/**"
       - "repo.json"
