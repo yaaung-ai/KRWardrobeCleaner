@@ -93,7 +93,7 @@ jobs:
         run: |
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --title "한국판 옷장 정리기 $env:VERSION" --notes "v0.4는 장비칸의 추억의 보관함 가능 장비를 먼저 안전 보관한 뒤 환상의 옷장을 정리합니다. 제작직 전용 장비 포함 여부를 선택할 수 있고, 장비 세트/염색/마테리아/투영/중복 장비는 보호합니다."
+            gh release create $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --title "히메짱 옷장 정리기 $env:VERSION" --notes "v0.5는 투영세트 사용 여부와 염색 상태를 반영한 환상의 옷장 정리, 장비함→인벤토리 이동, 체크 항목 상점 판매 기능을 추가합니다."
           } else {
             gh release upload $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --clobber
           }
@@ -101,7 +101,7 @@ jobs:
       - name: Build summary
         shell: pwsh
         run: |
-          Add-Content $env:GITHUB_STEP_SUMMARY "## 한국판 옷장 정리기 ${{ steps.package.outputs.version }}"
+          Add-Content $env:GITHUB_STEP_SUMMARY "## 히메짱 옷장 정리기 ${{ steps.package.outputs.version }}"
           Add-Content $env:GITHUB_STEP_SUMMARY "- DLL SHA-256: ${{ steps.package.outputs.dll_sha256 }}"
           Add-Content $env:GITHUB_STEP_SUMMARY "- ZIP SHA-256: ${{ steps.package.outputs.zip_sha256 }}"
           Add-Content $env:GITHUB_STEP_SUMMARY "- Custom repo: https://raw.githubusercontent.com/yaaung-ai/KRWardrobeCleaner/main/repo.json"
