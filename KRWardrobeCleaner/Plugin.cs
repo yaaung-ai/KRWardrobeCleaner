@@ -320,11 +320,22 @@ public sealed class Plugin : IDalamudPlugin
         if (ImGui.SliderInt("복원 중 남겨둘 가방 빈칸", ref reserve, 0, 30))
             cleanup.UpdateSettings(config.RestoreIntervalMs, reserve, config.AutoDepositToArmoire);
 
-        var autoDeposit = config.AutoDepositToArmoire;
-        if (ImGui.Checkbox("2단계 복원 완료 후 AutoRetainer로 추억의 보관함에 자동 보관", ref autoDeposit))
-            cleanup.UpdateSettings(config.RestoreIntervalMs, config.ReserveFreeSlots, autoDeposit);
+        if (!config.IncludeCraftingGearInArmoryPreclean)
+        {
+            if (config.AutoDepositToArmoire)
+                cleanup.UpdateSettings(config.RestoreIntervalMs, config.ReserveFreeSlots, false);
 
-        ImGui.TextWrapped("자동 보관을 켜면 복원이 끝난 뒤 환상의 옷장을 닫았을 때 /autoretainer armoire 명령을 실행합니다.");
+            ImGui.TextDisabled("AutoRetainer 자동 보관: 제작직 장비 제외가 켜져 있어 비활성화됨");
+            ImGui.TextWrapped("AutoRetainer의 /autoretainer armoire는 장비칸도 함께 처리할 수 있어 제작직 장비 제외 설정과 충돌할 수 있습니다. 제작직 장비 포함을 켠 경우에만 자동 보관을 허용합니다.");
+        }
+        else
+        {
+            var autoDeposit = config.AutoDepositToArmoire;
+            if (ImGui.Checkbox("2단계 복원 완료 후 AutoRetainer로 추억의 보관함에 자동 보관", ref autoDeposit))
+                cleanup.UpdateSettings(config.RestoreIntervalMs, config.ReserveFreeSlots, autoDeposit);
+
+            ImGui.TextWrapped("자동 보관을 켜면 복원이 끝난 뒤 환상의 옷장을 닫았을 때 /autoretainer armoire 명령을 실행합니다.");
+        }
 
         var showIds = config.ShowIds;
         if (ImGui.Checkbox("목록에 아이템 ID 표시", ref showIds))
