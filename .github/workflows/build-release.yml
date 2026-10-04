@@ -1,0 +1,98 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "KRWardrobeCleaner/**"
+      - "repo.json"
+      - ".github/workflows/build-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download Dalamud dev files
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:APPDATA "XIVLauncher\addon\Hooks\dev"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Invoke-WebRequest -Uri "https://goatcorp.github.io/dalamud-distrib/latest.zip" -OutFile "latest.zip"
+          Expand-Archive -Force "latest.zip" $dest
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build ".\KRWardrobeCleaner\KRWardrobeCleaner.csproj" --configuration Release
+
+      - name: Resolve package output
+        id: package
+        shell: pwsh
+        run: |
+          $project = [xml](Get-Content ".\KRWardrobeCleaner\KRWardrobeCleaner.csproj")
+          $version = [string]$project.Project.PropertyGroup.Version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+          $out = ".\KRWardrobeCleaner\bin\x64\Release\KRWardrobeCleaner"
+          if (-not (Test-Path $out)) {
+            Write-Host "Expected packager output was not found. Listing build tree:"
+            Get-ChildItem ".\KRWardrobeCleaner\bin" -Recurse | Select-Object FullName
+            throw "Dalamud packager output directory not found: $out"
+          }
+          $dll = Join-Path $out "KRWardrobeCleaner.dll"
+          $manifest = Join-Path $out "KRWardrobeCleaner.json"
+          if (-not (Test-Path $dll)) { throw "KRWardrobeCleaner.dll not found." }
+          if (-not (Test-Path $manifest)) { throw "KRWardrobeCleaner.json not found." }
+          Compress-Archive -Path "$out\*" -DestinationPath ".\KRWardrobeCleaner.zip" -Force
+          $dllHash = (Get-FileHash $dll -Algorithm SHA256).Hash
+          $zipHash = (Get-FileHash ".\KRWardrobeCleaner.zip" -Algorithm SHA256).Hash
+          Set-Content ".\SHA256SUMS.txt" "KRWardrobeCleaner.dll  $dllHash`nKRWardrobeCleaner.zip  $zipHash"
+          Copy-Item $dll ".\KRWardrobeCleaner.dll" -Force
+          "dll_sha256=$dllHash" >> $env:GITHUB_OUTPUT
+          "zip_sha256=$zipHash" >> $env:GITHUB_OUTPUT
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KRWardrobeCleaner-${{ steps.package.outputs.version }}
+          path: |
+            KRWardrobeCleaner.dll
+            KRWardrobeCleaner.zip
+            SHA256SUMS.txt
+            repo.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.package.outputs.tag }}
+          VERSION: ${{ steps.package.outputs.version }}
+        shell: pwsh
+        run: |
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --title "KR Wardrobe Cleaner $env:VERSION" --notes "Calibration release for the Korean FFXIV client. v0.1 scans Dungeon Drip snapshots and records restore UI events; it does not batch-restore items."
+          } else {
+            gh release upload $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --clobber
+          }
+
+      - name: Build summary
+        shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY "## KR Wardrobe Cleaner ${{ steps.package.outputs.version }}"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- DLL SHA-256: ${{ steps.package.outputs.dll_sha256 }}"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- ZIP SHA-256: ${{ steps.package.outputs.zip_sha256 }}"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Custom repo: https://raw.githubusercontent.com/yaaung-ai/KRWardrobeCleaner/main/repo.json"
