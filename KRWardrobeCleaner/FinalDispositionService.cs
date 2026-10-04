@@ -264,15 +264,9 @@ public sealed unsafe class FinalDispositionService
             return;
         }
 
-        if (!TryFindPhysicalItem(inventory, itemId, out _, out _, out var item))
+        if (!TryFindPhysicalItem(inventory, itemId, out _, out _, out _))
         {
             SkipCurrent($"{excel.NameOf(itemId)}: 장비함/인벤토리에서 찾지 못했습니다.", now);
-            return;
-        }
-
-        if (!IsPlainForStorage(item))
-        {
-            SkipCurrent($"{excel.NameOf(itemId)}: 염색·마테리아·투영 등 개별 상태가 있어 자동 보관하지 않습니다.", now);
             return;
         }
 
@@ -444,10 +438,7 @@ public sealed unsafe class FinalDispositionService
             if (requiredId == 0 || !selectedSet.Contains(requiredId))
                 continue;
 
-            if (!TryFindPhysicalItem(inventory, requiredId, out var type, out var slot, out var item))
-                continue;
-
-            if (!IsPlainForStorage(item))
+            if (!TryFindPhysicalItem(inventory, requiredId, out var type, out var slot, out _))
                 continue;
 
             containers[slotIndex] = type;
@@ -545,19 +536,6 @@ public sealed unsafe class FinalDispositionService
                 list.Add(row.RowId);
             }
         }
-    }
-
-    private static bool IsPlainForStorage(InventoryItem* item)
-    {
-        if (item == null) return false;
-        if (item->GetConditionPercentage() != 100) return false;
-        if (item->SpiritbondOrCollectability != 0) return false;
-        if (item->GlamourId != 0) return false;
-        if (item->Stains[0] != 0 || item->Stains[1] != 0) return false;
-        if ((item->Flags & InventoryItem.ItemFlags.CompanyCrestApplied) != 0) return false;
-        for (var i = 0; i < item->Materia.Length; i++)
-            if (item->Materia[i] != 0) return false;
-        return true;
     }
 
     private static bool TryFindPhysicalItem(
