@@ -35,6 +35,8 @@ public sealed class DungeonDripSnapshot
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
         var root = doc.RootElement;
         var dresserDirect = ReadUIntArray(root, "DresserDirect");
+        var dresserOutfitPieces = ReadObjectUIntKeys(root, "DresserOutfits");
+        var storedOutfits = ReadUIntArray(root, "StoredOutfits");
         var armoire = ReadUIntArray(root, "Armoire");
         var slotsUsed = ReadInt(root, "DresserSlotsUsed");
 
@@ -62,6 +64,9 @@ public sealed class DungeonDripSnapshot
             ArmoireCount = armoire.Count,
             CabinetEligibleCount = cabinet.Count,
             Candidates = candidates,
+            DresserDirectItems = dresserDirect,
+            DresserOutfitPieces = dresserOutfitPieces,
+            StoredOutfitIds = storedOutfits,
             DresserPaths = root.TryGetProperty("DresserDirect", out _) ? ["$.DresserDirect"] : [],
             ArmoirePaths = root.TryGetProperty("Armoire", out _) ? ["$.Armoire"] : [],
             Notes = notes,
@@ -76,6 +81,19 @@ public sealed class DungeonDripSnapshot
 
         foreach (var value in element.EnumerateArray())
             if (value.TryGetUInt32(out var id) && id != 0)
+                result.Add(id);
+
+        return result;
+    }
+
+    private static HashSet<uint> ReadObjectUIntKeys(JsonElement root, string propertyName)
+    {
+        var result = new HashSet<uint>();
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Object)
+            return result;
+
+        foreach (var prop in element.EnumerateObject())
+            if (uint.TryParse(prop.Name, out var id) && id != 0)
                 result.Add(id);
 
         return result;
