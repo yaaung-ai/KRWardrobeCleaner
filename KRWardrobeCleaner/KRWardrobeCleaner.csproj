@@ -1,6 +1,6 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.4.0.0</Version>
+    <Version>0.5.0.0</Version>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
@@ -11,9 +11,9 @@
     <AssemblyName>KRWardrobeCleaner</AssemblyName>
     <RootNamespace>KRWardrobeCleaner</RootNamespace>
     <Author>yaaung-ai</Author>
-    <Name>한국판 옷장 정리기</Name>
-    <Punchline>장비칸과 환상의 옷장을 추억의 보관함 기준으로 자동 정리합니다.</Punchline>
-    <Description>장비칸의 추억의 보관함 가능 장비를 먼저 안전 보관한 뒤, Dungeon Drip 스냅샷을 이용해 환상의 옷장 후보를 순차 복원합니다. 제작직 장비 포함 여부와 AutoRetainer 연동을 설정할 수 있습니다.</Description>
+    <Name>히메짱 옷장 정리기</Name>
+    <Punchline>만사가 귀찮은 공주님들을 위한 자동 정리 집사님!</Punchline>
+    <Description>만사가 귀찮은 공주님들을 위한 자동 정리 집사님!</Description>
     <RepoUrl>https://github.com/yaaung-ai/KRWardrobeCleaner</RepoUrl>
     <Tags>glamour;inventory;armoire;utility</Tags>
   </PropertyGroup>
