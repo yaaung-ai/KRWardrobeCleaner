@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main, v0.4-armory-preclean ]
+    branches: [ main, v0.5-himechan-organizer ]
     paths:
       - "KRWardrobeCleaner/**"
       - "repo.json"
