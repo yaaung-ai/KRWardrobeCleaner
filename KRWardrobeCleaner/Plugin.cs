@@ -35,7 +35,7 @@ public sealed class Plugin : IDalamudPlugin
         stage1 = new Stage1DresserToInventory(excel, glamourCache, GameGui, config, SaveConfig);
         stage2 = new Stage2InventoryToDresser(excel, scanner, outfits, GameGui, config, SaveConfig);
         stage3 = new Stage3ArmoryToInventory(scanner, config, SaveConfig);
-        stage4 = new Stage4Discard(scanner, GameGui);
+        stage4 = new Stage4Discard(scanner, GameGui, config, SaveConfig);
 
         Commands.AddHandler("/kwc", new CommandInfo((_, _) => windowOpen = !windowOpen)
         {
@@ -82,7 +82,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!windowOpen) return;
 
         ImGui.SetNextWindowSize(new Vector2(920, 820), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("히메짱 옷장 정리기 v0.8###KRWardrobeCleaner", ref windowOpen))
+        if (!ImGui.Begin("히메짱 옷장 정리기 v0.8.1###KRWardrobeCleaner", ref windowOpen))
         {
             ImGui.End();
             return;
@@ -306,7 +306,8 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawStage4()
     {
         ImGui.TextWrapped("장비함과 일반 인벤토리의 장비를 체크해서 자동 파기합니다. 마테리아 장착 및 투영 여부는 무시합니다.");
-        ImGui.TextWrapped("파기 과정에서 확인 창이 뜨면 체크한 아이템에 대해 자동으로 '예'를 선택합니다.");
+        ImGui.TextWrapped("스마트 선택은 3번 탭과 동일하게 요구 착용 레벨과 제작자/채집가 장비 포함 여부를 사용합니다.");
+        ImGui.TextWrapped("'4번 인벤토리 전체 파기'는 Inventory4의 모든 슬롯을 대상으로 하며, 장비가 아닌 일반 아이템도 포함합니다.");
 
         if (!stage4.IsRunning)
         {
@@ -319,15 +320,38 @@ public sealed class Plugin : IDalamudPlugin
             if (ImGui.Button("전체 체크 해제##s4none"))
                 stage4.SelectAll(false);
 
+            var include = config.Stage4SmartIncludeCrafterGatherer;
+            if (ImGui.Checkbox("스마트 선택에 제작자/채집가 장비 포함##s4smartcraft", ref include))
+                stage4.UpdateSmartSettings(include, config.Stage4SmartMaxLevel);
+
+            var maxLevel = config.Stage4SmartMaxLevel;
+            ImGui.SetNextItemWidth(140);
+            if (ImGui.InputInt("요구 착용 레벨 이하##s4smartlevel", ref maxLevel))
+                stage4.UpdateSmartSettings(config.Stage4SmartIncludeCrafterGatherer, maxLevel);
+
+            if (ImGui.Button("스마트 선택##s4smart"))
+                stage4.SmartSelect();
+
+            ImGui.SameLine();
             if (ImGui.Button($"체크한 아이템 자동 파기 ({stage4.Selected.Count}개)"))
             {
                 if (!AnyOtherRunning(stage4.IsRunning))
-                    stage4.Start();
+                    stage4.StartSelected();
             }
+
+            ImGui.Separator();
+            var bag4Count = stage4.PreviewInventory4Count();
+            if (ImGui.Button($"4번 인벤토리에 있는 모든 아이템 파기 ({bag4Count}슬롯)"))
+            {
+                if (!AnyOtherRunning(stage4.IsRunning))
+                    stage4.StartInventory4All();
+            }
+            ImGui.TextWrapped("이 버튼은 4번 인벤토리(Inventory4)만 대상으로 하며, 현재 들어 있는 모든 아이템 스택을 처리합니다.");
         }
         else
         {
-            ImGui.TextUnformatted($"진행: 파기 {stage4.Discarded} · 제외 {stage4.Skipped} · 실패 {stage4.Failed}");
+            var mode = stage4.IsBag4Mode ? "4번 인벤토리 전체 파기" : "선택 장비 파기";
+            ImGui.TextUnformatted($"{mode} 진행: 파기 {stage4.Discarded} · 제외 {stage4.Skipped} · 실패 {stage4.Failed}");
             if (ImGui.Button("4단계 중지"))
                 stage4.Stop();
         }
