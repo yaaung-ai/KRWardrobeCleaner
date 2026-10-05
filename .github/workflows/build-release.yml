@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main, v0.7-stage34, fix/stage34-state-cache ]
+    branches: [ main, v0.8-tabbed-workflows ]
     paths:
       - "KRWardrobeCleaner/**"
       - "repo.json"
@@ -93,7 +93,7 @@ jobs:
         run: |
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --title "히메짱 옷장 정리기 $env:VERSION" --notes "v0.7.1은 염색/마테리아/투영 등 개별 상태 장비를 자동 제외하지 않도록 수정하고, 3단계에서 보관함 비대상 장비까지 검색하며, 환상의 옷장과 투영세트 데이터를 별도 캐시해 4단계의 동시 로드 요구를 제거합니다."
+            gh release create $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --title "히메짱 옷장 정리기 $env:VERSION" --notes "v0.8은 UI를 4개 단계별 탭으로 재구성하고, 환상의 옷장→인벤토리 복원, 장비함+인벤토리→환상의 옷장 저장, 스마트 장비함 이동, 자동 파기 기능만 남긴 정리 버전입니다. 마테리아와 투영 상태는 후보 필터에서 제외하지 않습니다."
           } else {
             gh release upload $env:TAG ".\KRWardrobeCleaner.zip#Dalamud install package" ".\KRWardrobeCleaner.dll#Raw DLL" ".\SHA256SUMS.txt#SHA-256 checksums" --clobber
           }

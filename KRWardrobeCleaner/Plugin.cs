@@ -11,77 +11,55 @@ public sealed class Plugin : IDalamudPlugin
 {
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ICommandManager Commands { get; private set; } = null!;
-    [PluginService] internal static IChatGui Chat { get; private set; } = null!;
     [PluginService] internal static IDataManager Data { get; private set; } = null!;
-    [PluginService] internal static IAgentLifecycle AgentLifecycle { get; private set; } = null!;
-    [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
 
     private readonly Configuration config;
-    private readonly DungeonDripSnapshot snapshots;
-    private readonly CalibrationRecorder recorder;
-    private readonly DiagnosticExporter exporter;
-    private readonly DresserRestoreTester restoreTester;
-    private readonly WardrobeCleanupService cleanup;
-    private readonly ArmoryArmoireService armoryPreclean;
     private readonly GlamourStateCache glamourCache;
-    private readonly GlamourPlateFilter plateFilter;
-    private readonly ArmoryMoveSellService armoryMoveSell;
-    private readonly FinalDispositionService finalDisposition;
-    private readonly DresserUnusedService dresserUnused;
+    private readonly Stage1DresserToInventory stage1;
+    private readonly Stage2InventoryToDresser stage2;
+    private readonly Stage3ArmoryToInventory stage3;
+    private readonly Stage4Discard stage4;
 
-    private ScanResult scan = new();
-    private PlateFilterResult plateResult = new([], 0, 0, 0, false);
     private bool windowOpen = true;
-    private int selectedIndex = -1;
-    private string status = "집사님이 정리할 준비를 하고 있습니다.";
 
     public Plugin()
     {
         config = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         var excel = new ExcelIndex(Data);
+        var scanner = new InventoryScanner(excel);
+        var outfits = new OutfitCatalog(Data, excel);
 
-        snapshots = new DungeonDripSnapshot(excel);
-        recorder = new CalibrationRecorder(AgentLifecycle, Log);
-        recorder.SetEnabled(config.CalibrationMode);
-        exporter = new DiagnosticExporter(PluginInterface);
-        restoreTester = new DresserRestoreTester(GameGui);
-        cleanup = new WardrobeCleanupService(restoreTester, Commands, config, SaveConfig);
-        armoryPreclean = new ArmoryArmoireService(excel, config, SaveConfig);
         glamourCache = new GlamourStateCache();
-        plateFilter = new GlamourPlateFilter(glamourCache);
-        armoryMoveSell = new ArmoryMoveSellService(excel, config, SaveConfig, Data, GameGui);
-        finalDisposition = new FinalDispositionService(excel, Data, GameGui, config);
-        dresserUnused = new DresserUnusedService(excel, restoreTester, config, Commands, glamourCache);
+        stage1 = new Stage1DresserToInventory(excel, glamourCache, GameGui, config, SaveConfig);
+        stage2 = new Stage2InventoryToDresser(excel, scanner, outfits, GameGui, config, SaveConfig);
+        stage3 = new Stage3ArmoryToInventory(scanner, config, SaveConfig);
+        stage4 = new Stage4Discard(scanner, GameGui);
 
-        Commands.AddHandler("/kwc", new CommandInfo(OnCommand)
+        Commands.AddHandler("/kwc", new CommandInfo((_, _) => windowOpen = !windowOpen)
         {
-            HelpMessage = "히메짱 옷장 정리기를 엽니다. /kwc 검색, /kwc 중지, /kwc 보관함, /kwc 진단",
+            HelpMessage = "히메짱 옷장 정리기를 엽니다.",
         });
 
         PluginInterface.UiBuilder.Draw += Draw;
         PluginInterface.UiBuilder.OpenMainUi += Open;
         PluginInterface.UiBuilder.OpenConfigUi += Open;
         Framework.Update += OnFrameworkUpdate;
-
-        Rescan();
     }
 
     public void Dispose()
     {
-        armoryPreclean.Stop("플러그인이 종료되어 장비함 정리를 중지했습니다.");
-        cleanup.Stop("플러그인이 종료되어 환상의 옷장 정리를 중지했습니다.");
-        armoryMoveSell.Stop();
-        finalDisposition.Stop("플러그인이 종료되어 3단계 처리를 중지했습니다.");
-        dresserUnused.Stop("플러그인이 종료되어 4단계 복원을 중지했습니다.");
+        stage1.Stop("플러그인이 종료되어 작업을 중지했습니다.");
+        stage2.Stop("플러그인이 종료되어 작업을 중지했습니다.");
+        stage3.Stop("플러그인이 종료되어 작업을 중지했습니다.");
+        stage4.Stop("플러그인이 종료되어 작업을 중지했습니다.");
 
         Framework.Update -= OnFrameworkUpdate;
         PluginInterface.UiBuilder.Draw -= Draw;
         PluginInterface.UiBuilder.OpenMainUi -= Open;
         PluginInterface.UiBuilder.OpenConfigUi -= Open;
         Commands.RemoveHandler("/kwc");
-        recorder.Dispose();
     }
 
     private void Open() => windowOpen = true;
@@ -89,595 +67,293 @@ public sealed class Plugin : IDalamudPlugin
     private void OnFrameworkUpdate(IFramework framework)
     {
         glamourCache.Observe();
-        armoryPreclean.Tick();
-        cleanup.Tick();
-        armoryMoveSell.Tick();
-        finalDisposition.Tick();
-        dresserUnused.Tick();
-
-        if (cleanup.ConsumeRescanRequest())
-        {
-            status = cleanup.Status;
-            Rescan(updateStatus: false);
-        }
-    }
-
-    private void OnCommand(string command, string args)
-    {
-        switch (args.Trim().ToLowerInvariant())
-        {
-            case "scan":
-            case "검색":
-                Rescan();
-                armoryMoveSell.Scan();
-                windowOpen = true;
-                break;
-
-            case "stop":
-            case "중지":
-                armoryPreclean.Stop();
-                cleanup.Stop();
-                armoryMoveSell.Stop();
-                finalDisposition.Stop();
-                dresserUnused.Stop();
-                status = "진행 중인 자동 정리 작업을 중지했습니다.";
-                windowOpen = true;
-                break;
-
-            case "armoire":
-            case "보관함":
-                cleanup.DepositNow();
-                status = cleanup.Status;
-                windowOpen = true;
-                break;
-
-            case "calibrate":
-            case "진단":
-                config.CalibrationMode = !config.CalibrationMode;
-                recorder.SetEnabled(config.CalibrationMode);
-                SaveConfig();
-                status = $"진단 이벤트 기록: {(config.CalibrationMode ? "켜짐" : "꺼짐")}";
-                windowOpen = true;
-                break;
-
-            default:
-                windowOpen = !windowOpen;
-                break;
-        }
-    }
-
-    private void Rescan(bool updateStatus = true)
-    {
-        try
-        {
-            if (updateStatus)
-                status = "Dungeon Drip 스냅샷과 추억의 보관함 가능 목록을 확인하는 중입니다...";
-
-            scan = snapshots.Scan(config.OwnershipSnapshotPath);
-            if (scan.SnapshotPath is not null)
-                config.OwnershipSnapshotPath = scan.SnapshotPath;
-
-            selectedIndex = scan.Candidates.Count > 0
-                ? Math.Clamp(selectedIndex, 0, scan.Candidates.Count - 1)
-                : -1;
-
-            plateResult = plateFilter.Filter(scan.Candidates);
-            SaveConfig();
-
-            if (updateStatus)
-            {
-                var already = scan.Candidates.Count(x => x.AlreadyInArmoire);
-                var newStore = scan.Candidates.Count - already;
-                status = plateResult.PlateDataReady
-                    ? $"검색 완료: 보관함 대응 {scan.Candidates.Count}개 (이미 등록 {already} / 신규 {newStore}), 투영세트 기준 정리 가능 {plateResult.Eligible.Count}개."
-                    : $"검색 완료: 보관함 대응 {scan.Candidates.Count}개 (이미 등록 {already} / 신규 {newStore}). 환상의 옷장과 투영세트 편집 화면을 각각 한 번 열면 캐시된 두 데이터를 함께 분석합니다.";
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "[KWC] 검색 실패");
-            status = $"검색 실패: {ex.GetType().Name}: {ex.Message}";
-        }
-    }
-
-    private void RefreshPlateAnalysis()
-    {
-        plateResult = plateFilter.Filter(scan.Candidates);
-        status = plateResult.PlateDataReady
-            ? $"투영세트 분석 완료: 미사용 {plateResult.NotUsedOnPlates} · 사용 중 무염색 {plateResult.UsedUndyed} · 염색 보호 {plateResult.ProtectedDyed}."
-            : "투영세트/환상의 옷장 캐시가 아직 준비되지 않았습니다. 두 화면을 각각 한 번 열어 데이터를 읽힌 뒤 다시 시도해 주세요.";
+        stage1.Tick();
+        stage2.Tick();
+        stage3.Tick();
+        stage4.Tick();
     }
 
     private void SaveConfig() => PluginInterface.SavePluginConfig(config);
+
+    private bool AnyRunning => stage1.IsRunning || stage2.IsRunning || stage3.IsRunning || stage4.IsRunning;
 
     private void Draw()
     {
         if (!windowOpen) return;
 
-        ImGui.SetNextWindowSize(new Vector2(880, 900), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("히메짱 옷장 정리기 v0.7.1###KRWardrobeCleaner", ref windowOpen))
+        ImGui.SetNextWindowSize(new Vector2(920, 820), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("히메짱 옷장 정리기 v0.8###KRWardrobeCleaner", ref windowOpen))
         {
             ImGui.End();
             return;
         }
 
-        ImGui.TextWrapped("만사가 귀찮은 공주님들을 위한 자동 정리 집사님!");
-        ImGui.Separator();
+        if (ImGui.BeginTabBar("KWCStages", ImGuiTabBarFlags.None))
+        {
+            if (ImGui.BeginTabItem("1. 옷장 → 인벤토리"))
+            {
+                DrawStage1();
+                ImGui.EndTabItem();
+            }
 
-        DrawArmoryPreclean();
-        ImGui.Separator();
+            if (ImGui.BeginTabItem("2. 환상의 옷장에 넣기"))
+            {
+                DrawStage2();
+                ImGui.EndTabItem();
+            }
 
-        DrawPlateAwareDresserCleanup();
-        ImGui.Separator();
+            if (ImGui.BeginTabItem("3. 장비함 → 인벤토리"))
+            {
+                DrawStage3();
+                ImGui.EndTabItem();
+            }
 
-        DrawArmoryMoveSell();
-        ImGui.Separator();
+            if (ImGui.BeginTabItem("4. 자동 파기"))
+            {
+                DrawStage4();
+                ImGui.EndTabItem();
+            }
 
-        DrawUnusedDresser();
-        ImGui.Separator();
+            ImGui.EndTabBar();
+        }
 
-        DrawOptions();
-        ImGui.Separator();
-
-        DrawDresserCandidates();
-        DrawDiagnostics();
+        if (AnyRunning)
+        {
+            ImGui.Separator();
+            if (ImGui.Button("진행 중인 작업 전체 중지"))
+            {
+                stage1.Stop();
+                stage2.Stop();
+                stage3.Stop();
+                stage4.Stop();
+            }
+        }
 
         ImGui.End();
     }
 
-    private void DrawArmoryPreclean()
+    private void DrawStage1()
     {
-        ImGui.TextUnformatted("1단계 · 장비함 → 추억의 보관함");
-        ImGui.TextWrapped("추억의 보관함을 직접 연 상태에서 실행합니다. 저장된 장비 세트와 중복 장비는 건너뛰지만, 염색/마테리아/투영 등 개별 상태가 있는 장비는 후보에서 제외하지 않습니다.");
+        ImGui.TextWrapped("추억의 보관함에 넣을 수 있는 아이템이 환상의 옷장에 들어 있는 경우를 찾아 인벤토리로 복원합니다.");
+        ImGui.TextWrapped($"투영세트 캐시: {(glamourCache.HasPlateData ? $"{glamourCache.PlateItemCount}종" : "대기")}");
 
-        if (!armoryPreclean.IsRunning)
+        if (!stage1.IsRunning)
         {
-            if (ImGui.Button("장비함 후보 검색##preclean"))
-            {
-                armoryPreclean.Scan();
-                status = armoryPreclean.Status;
-            }
-
+            if (ImGui.Button("후보 검색##s1scan"))
+                stage1.Scan();
             ImGui.SameLine();
-            if (ImGui.Button($"후보 보관 시작 ({armoryPreclean.Candidates.Count}개)##precleanstart"))
+            if (ImGui.Button("전체 체크##s1all"))
+                stage1.SelectAll(true);
+            ImGui.SameLine();
+            if (ImGui.Button("전체 체크 해제##s1none"))
+                stage1.SelectAll(false);
+
+            var dyed = config.Stage1IncludeDyed;
+            if (ImGui.Checkbox("염색된 아이템도 옮기기", ref dyed))
+                stage1.UpdateOptions(dyed, config.Stage1IncludePlateRegistered);
+
+            var plate = config.Stage1IncludePlateRegistered;
+            if (ImGui.Checkbox("투영 세트에 등록 중인 아이템도 옮기기", ref plate))
+                stage1.UpdateOptions(config.Stage1IncludeDyed, plate);
+
+            if (ImGui.Button($"체크 항목 인벤토리로 이동 ({stage1.Selected.Count}개)"))
             {
-                if (!cleanup.IsRunning && !armoryMoveSell.IsMoving && !armoryMoveSell.IsSelling)
-                {
-                    armoryPreclean.Start();
-                    status = armoryPreclean.Status;
-                }
-                else
-                {
-                    status = "다른 정리 작업이 진행 중입니다.";
-                }
+                if (!AnyOtherRunning(stage1.IsRunning))
+                    stage1.Start();
             }
         }
         else
         {
-            ImGui.TextUnformatted($"진행: {armoryPreclean.Processed}/{armoryPreclean.Total} · 보관 {armoryPreclean.Stored} · 제외 {armoryPreclean.Skipped} · 실패 {armoryPreclean.Failed}");
+            ImGui.TextUnformatted($"진행: 복원 {stage1.Restored} · 제외 {stage1.Skipped} · 실패 {stage1.Failed}");
             if (ImGui.Button("1단계 중지"))
-            {
-                armoryPreclean.Stop();
-                status = armoryPreclean.Status;
-            }
+                stage1.Stop();
         }
 
-        ImGui.TextWrapped($"상태: {armoryPreclean.Status}");
-        ImGui.TextWrapped($"검색 상태: 제작직 제외 {armoryPreclean.SkippedCrafting} · 장비 세트 제외 {armoryPreclean.SkippedGearset} · 개별 상태 표시 {armoryPreclean.SkippedModified} · 중복 제외 {armoryPreclean.SkippedDuplicate}");
+        ImGui.TextWrapped($"상태: {stage1.Status}");
+        if (!string.IsNullOrWhiteSpace(stage1.LastItemStatus))
+            ImGui.TextWrapped($"최근 처리: {stage1.LastItemStatus}");
+
+        ImGui.BeginChild("Stage1List", new Vector2(0, 580), true);
+        foreach (var entry in stage1.Entries)
+        {
+            var selected = stage1.Selected.Contains(entry.DresserSlot);
+            var suffix = string.Empty;
+            if (entry.IsDyed) suffix += " [염색됨]";
+            if (entry.UsedOnPlate) suffix += " [투영 세트 등록중]";
+            if (ImGui.Checkbox($"{entry.Name}{suffix}##s1-{entry.DresserSlot}", ref selected))
+                stage1.SetSelected(entry.DresserSlot, selected);
+        }
+        ImGui.EndChild();
     }
 
-    private void DrawPlateAwareDresserCleanup()
+    private void DrawStage2()
     {
-        ImGui.TextUnformatted("2단계 · 환상의 옷장 → 추억의 보관함");
-        ImGui.TextWrapped("추억의 보관함 가능 아이템 중 ① 현재 투영세트에서 쓰이지 않거나, ② 투영세트에서 쓰이지만 염색이 없는 아이템만 복원 대상으로 잡습니다. 투영세트에서 염색된 외형은 보호합니다.");
+        ImGui.TextWrapped("장비함과 일반 인벤토리에서 환상의 옷장에 넣을 수 있는 장비를 찾아, 기존 의상 세트 보충 또는 세트 우선 저장 후 단벌 저장을 수행합니다.");
+        ImGui.TextWrapped("마테리아 장착 및 현재 투영 상태는 후보 판정에서 무시합니다.");
 
-        if (ImGui.Button("후보 다시 검색##dresser"))
-            Rescan();
-
-        ImGui.SameLine();
-        if (ImGui.Button("투영세트 기준 다시 분석"))
-            RefreshPlateAnalysis();
-
-        ImGui.SameLine();
-        if (ImGui.Button("Dungeon Drip 새로고침"))
+        if (!stage2.IsRunning)
         {
-            Commands.ProcessCommand("/dungeondrip refresh");
-            status = "Dungeon Drip 새로고침을 요청했습니다.";
-        }
+            if (ImGui.Button("후보 검색##s2scan"))
+                stage2.Scan();
+            ImGui.SameLine();
+            if (ImGui.Button("기존 세트에 포함해서 넣을 수 있는 아이템 전체 체크"))
+                stage2.SelectExistingSetCandidates();
+            ImGui.SameLine();
+            if (ImGui.Button("전체 체크##s2all"))
+                stage2.SelectAll(true);
+            ImGui.SameLine();
+            if (ImGui.Button("전체 체크 해제##s2none"))
+                stage2.SelectAll(false);
 
-        ImGui.TextWrapped(
-            plateResult.PlateDataReady
-                ? $"분류: 미사용 {plateResult.NotUsedOnPlates} · 사용 중 무염색 {plateResult.UsedUndyed} · 염색 보호 {plateResult.ProtectedDyed} · 실제 정리 가능 {plateResult.Eligible.Count}"
-                : "분류: 투영세트 데이터 대기 중");
+            var dyed = config.Stage2IncludeDyed;
+            if (ImGui.Checkbox("염색된 아이템도 옮기기##s2dyed", ref dyed))
+                stage2.UpdateIncludeDyed(dyed);
 
-        if (plateResult.PlateDataReady && plateResult.Eligible.Any(x => x.SourceDyed && !x.UsedOnPlate))
-            ImGui.TextWrapped("주의: 투영세트에서 사용하지 않는 아이템은 조건상 정리 대상입니다. 해당 원본에 염색이 남아 있다면 추억의 보관함 이동 과정에서 그 염색은 사라질 수 있습니다.");
-
-        var displayedStatus = cleanup.IsRunning || cleanup.IsWaitingForAutoDeposit ? cleanup.Status : status;
-        ImGui.TextWrapped($"상태: {displayedStatus}");
-
-        var freeSlots = restoreTester.GetFreeBagSlots();
-        var alreadyInArmoire = scan.Candidates.Count(x => x.AlreadyInArmoire);
-        var notYetInArmoire = scan.Candidates.Count - alreadyInArmoire;
-        ImGui.TextUnformatted(
-            $"환상의 옷장 사용: {scan.DresserCount} | 보관함 기록: {scan.ArmoireCount} | 보관함 대응: {scan.Candidates.Count} (이미 등록 {alreadyInArmoire} / 신규 {notYetInArmoire}) | 가방 빈칸: {(freeSlots < 0 ? "확인 불가" : freeSlots)}");
-
-        foreach (var note in scan.Notes)
-            ImGui.TextWrapped("안내: " + note);
-
-        if (!cleanup.IsRunning)
-        {
-            if (ImGui.Button($"투영세트 기준 안전 후보 전체 복원 ({plateResult.Eligible.Count}개)"))
+            if (ImGui.Button($"체크 → 기존 세트에 포함해서 넣기 ({stage2.Selected.Count}개)"))
             {
-                RefreshPlateAnalysis();
-                if (!plateResult.PlateDataReady)
-                {
-                    // RefreshPlateAnalysis already set a useful status.
-                }
-                else if (armoryPreclean.IsRunning || armoryMoveSell.IsMoving || armoryMoveSell.IsSelling)
-                {
-                    status = "다른 정리 작업이 진행 중입니다.";
-                }
-                else
-                {
-                    cleanup.Start(plateResult.Eligible);
-                    status = cleanup.Status;
-                }
+                if (!AnyOtherRunning(stage2.IsRunning))
+                    stage2.StartExistingSetsOnly();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button($"체크 → 세트 우선, 이후 단벌로 넣기 ({stage2.Selected.Count}개)"))
+            {
+                if (!AnyOtherRunning(stage2.IsRunning))
+                    stage2.StartSetsThenSingles();
             }
         }
         else
         {
-            ImGui.TextUnformatted($"진행: {cleanup.Processed}/{cleanup.Total} · 복원 {cleanup.Restored} · 제외 {cleanup.Skipped} · 실패 {cleanup.Failed}");
+            ImGui.TextUnformatted($"진행: 저장 {stage2.Stored} · 제외 {stage2.Skipped} · 실패 {stage2.Failed}");
             if (ImGui.Button("2단계 중지"))
-            {
-                cleanup.Stop();
-                status = cleanup.Status;
-            }
+                stage2.Stop();
         }
 
-        ImGui.SameLine();
-        if (ImGui.Button("가방의 보관 가능 아이템 → 추억의 보관함"))
+        ImGui.TextWrapped($"상태: {stage2.Status}");
+        if (!string.IsNullOrWhiteSpace(stage2.LastItemStatus))
+            ImGui.TextWrapped($"최근 처리: {stage2.LastItemStatus}");
+
+        ImGui.BeginChild("Stage2List", new Vector2(0, 560), true);
+        foreach (var entry in stage2.Entries)
         {
-            cleanup.DepositNow();
-            status = cleanup.Status;
-        }
-    }
-
-    private void DrawArmoryMoveSell()
-    {
-        ImGui.TextUnformatted("3단계 · 남은 장비 최종 정리");
-        ImGui.TextWrapped("장비함과 일반 인벤토리의 장비를 함께 검색합니다. 추억의 보관함 대응 여부와 개별 상태를 표시하고, 원하는 항목을 체크한 뒤 최종 목적지를 선택하세요: 추억의 보관함 / 상점 판매 / 세트화하여 환상의 옷장.");
-
-        if (!armoryMoveSell.IsMoving && !armoryMoveSell.IsSelling && !finalDisposition.IsRunning)
-        {
-            if (ImGui.Button("3단계 후보 검색"))
-            {
-                armoryMoveSell.Scan();
-                status = armoryMoveSell.Status;
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button("전체 선택"))
-                armoryMoveSell.SelectAll(true);
-
-            ImGui.SameLine();
-            if (ImGui.Button("전체 해제"))
-                armoryMoveSell.SelectAll(false);
-
-            ImGui.TextUnformatted($"체크됨: {armoryMoveSell.Selected.Count}개");
-
-            if (ImGui.Button($"체크 → 추억의 보관함 ({armoryMoveSell.Selected.Count}개)"))
-            {
-                if (!cleanup.IsRunning && !armoryPreclean.IsRunning)
-                {
-                    finalDisposition.StartArmoire(armoryMoveSell.SelectedEntries);
-                    status = finalDisposition.Status;
-                }
-                else
-                {
-                    status = "다른 정리 작업이 진행 중입니다.";
-                }
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button($"체크 → 상점 판매 ({armoryMoveSell.Selected.Count}개)"))
-            {
-                if (!cleanup.IsRunning && !armoryPreclean.IsRunning)
-                {
-                    finalDisposition.StartSell(armoryMoveSell.SelectedEntries);
-                    status = finalDisposition.Status;
-                }
-                else
-                {
-                    status = "다른 정리 작업이 진행 중입니다.";
-                }
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button($"체크 → 세트화 후 환상의 옷장 ({armoryMoveSell.Selected.Count}개)"))
-            {
-                if (!cleanup.IsRunning && !armoryPreclean.IsRunning)
-                {
-                    finalDisposition.StartOutfit(armoryMoveSell.SelectedEntries);
-                    status = finalDisposition.Status;
-                }
-                else
-                {
-                    status = "다른 정리 작업이 진행 중입니다.";
-                }
-            }
-
-            if (ImGui.Button($"체크 항목 인벤토리로만 이동 ({armoryMoveSell.Selected.Count}개)"))
-            {
-                if (!cleanup.IsRunning && !armoryPreclean.IsRunning)
-                {
-                    armoryMoveSell.StartMoveSelected();
-                    status = armoryMoveSell.Status;
-                }
-                else
-                {
-                    status = "다른 정리 작업이 진행 중입니다.";
-                }
-            }
-        }
-        else
-        {
-            if (finalDisposition.IsRunning)
-            {
-                var mode = finalDisposition.Mode switch
-                {
-                    FinalActionMode.Armoire => "추억의 보관함",
-                    FinalActionMode.Sell => "상점 판매",
-                    FinalActionMode.Outfit => "세트화",
-                    _ => "처리",
-                };
-                ImGui.TextUnformatted($"{mode} 진행: {finalDisposition.Processed}/{finalDisposition.Total} · 성공 {finalDisposition.Success} · 제외 {finalDisposition.Skipped} · 실패 {finalDisposition.Failed}");
-            }
-            else
-            {
-                var mode = armoryMoveSell.IsMoving ? "인벤토리 이동" : "상점 판매";
-                ImGui.TextUnformatted($"{mode} 진행 중 · 이동 {armoryMoveSell.Moved} · 판매 {armoryMoveSell.Sold} · 제외 {armoryMoveSell.Skipped} · 실패 {armoryMoveSell.Failed}");
-            }
-
-            if (ImGui.Button("3단계 작업 중지"))
-            {
-                armoryMoveSell.Stop();
-                finalDisposition.Stop();
-                status = "3단계 작업을 중지했습니다.";
-            }
-        }
-
-        ImGui.TextWrapped($"상태: {(finalDisposition.IsRunning ? finalDisposition.Status : armoryMoveSell.Status)}");
-        if (!string.IsNullOrWhiteSpace(finalDisposition.LastItemStatus))
-            ImGui.TextWrapped($"최근 처리: {finalDisposition.LastItemStatus}");
-        else if (!string.IsNullOrWhiteSpace(armoryMoveSell.LastItemStatus))
-            ImGui.TextWrapped($"최근 처리: {armoryMoveSell.LastItemStatus}");
-
-        ImGui.TextWrapped($"검색 상태: 제작직 제외 {armoryMoveSell.SkippedCrafting} · 장비 세트 표시 {armoryMoveSell.SkippedGearset} · 개별 상태 표시 {armoryMoveSell.SkippedModified} · 중복 제외 {armoryMoveSell.SkippedDuplicate}");
-
-        ImGui.BeginChild("ArmoryMoveSellList", new Vector2(0, 260), true);
-        foreach (var entry in armoryMoveSell.Entries)
-        {
-            var selected = armoryMoveSell.Selected.Contains(entry.ItemId);
-            var suffix = entry.CanStoreInArmoire
-                ? (entry.AlreadyInArmoire ? " [보관함 보유]" : " [보관함 미보유]")
-                : " [보관함 비대상]";
-            suffix += entry.InInventory ? " [인벤토리]" : " [장비함]";
-            if (entry.IsCraftingGear) suffix += " [제작직]";
-            if (entry.InGearset) suffix += " [장비 세트]";
-            if (entry.IsDyed) suffix += " [염색]";
-            if (entry.IsGlamoured) suffix += " [투영]";
-            if (entry.HasMateria) suffix += " [마테리아]";
-            if (entry.HasModifiedState && !entry.IsDyed && !entry.IsGlamoured && !entry.HasMateria) suffix += " [기타 개별 상태]";
-            if (ImGui.Checkbox($"{entry.Name}{suffix}##manage{entry.ItemId}", ref selected))
-                armoryMoveSell.SetSelected(entry.ItemId, selected);
+            var selected = stage2.Selected.Contains(entry.Key);
+            var suffix = entry.IsDyed ? " [염색됨]" : string.Empty;
+            suffix += IsBag(entry.Key.Container) ? " [인벤토리]" : " [장비함]";
+            if (ImGui.Checkbox($"{entry.Name}{suffix}##s2-{entry.Key.Id}", ref selected))
+                stage2.SetSelected(entry.Key, selected);
         }
         ImGui.EndChild();
-
-        ImGui.TextWrapped("염색·마테리아·투영 등 개별 상태는 목록에 표시만 하며, 추억의 보관함/세트화에서도 자동 제외하지 않습니다. 해당 목적지에서 처리할 수 없는 장비는 게임 요청이 거절되면 실패로 표시됩니다. 상점 판매는 일반 상점의 구매/판매 창을 연 상태에서 실행합니다.");
-        ImGui.TextWrapped("세트화는 체크 항목 중 같은 '의상 투영' 세트에 속하는 장비가 2개 이상일 때만 실행합니다. 환상의 옷장을 연 상태여야 합니다.");
     }
 
-    private void DrawUnusedDresser()
+    private void DrawStage3()
     {
-        ImGui.TextUnformatted("4단계 · 미사용 환상의 옷장 아이템 꺼내기");
-        ImGui.TextWrapped("환상의 옷장에 개별 보관된 아이템 중 의상 투영 세트에 들어 있지 않고, 현재 어떤 투영세트에서도 사용하지 않는 항목만 표시합니다. 체크한 항목은 인벤토리로만 복원합니다.");
-        ImGui.TextWrapped($"데이터 캐시: 환상의 옷장 {(glamourCache.HasDresserData ? $"{glamourCache.DresserItemCount}종" : "대기")} · 투영세트 {(glamourCache.HasPlateData ? $"{glamourCache.PlateItemCount}종" : "대기")}. 두 화면을 동시에 열 필요는 없습니다.");
+        ImGui.TextWrapped("장비함의 장비를 일반 인벤토리로 옮깁니다. 스마트 선택은 요구 착용 레벨과 제작자/채집가 장비 포함 여부만 사용합니다.");
 
-        if (!dresserUnused.IsRunning)
+        if (!stage3.IsRunning)
         {
-            if (ImGui.Button("4단계 후보 검색"))
-            {
-                dresserUnused.Scan(scan);
-                status = dresserUnused.Status;
-            }
+            if (ImGui.Button("후보 검색##s3scan"))
+                stage3.Scan();
+            ImGui.SameLine();
+            if (ImGui.Button("전체 체크##s3all"))
+                stage3.SelectAll(true);
+            ImGui.SameLine();
+            if (ImGui.Button("전체 체크 해제##s3none"))
+                stage3.SelectAll(false);
+
+            var include = config.Stage3SmartIncludeCrafterGatherer;
+            if (ImGui.Checkbox("스마트 선택에 제작자/채집가 장비 포함", ref include))
+                stage3.UpdateSmartSettings(include, config.Stage3SmartMaxLevel);
+
+            var maxLevel = config.Stage3SmartMaxLevel;
+            ImGui.SetNextItemWidth(140);
+            if (ImGui.InputInt("요구 착용 레벨 이하", ref maxLevel))
+                stage3.UpdateSmartSettings(config.Stage3SmartIncludeCrafterGatherer, maxLevel);
+
+            if (ImGui.Button("스마트 선택"))
+                stage3.SmartSelect();
 
             ImGui.SameLine();
-            if (ImGui.Button("4단계 전체 선택"))
-                dresserUnused.SelectAll(true);
-
-            ImGui.SameLine();
-            if (ImGui.Button("4단계 전체 해제"))
-                dresserUnused.SelectAll(false);
-
-            if (ImGui.Button($"체크 항목 인벤토리로 이동 ({dresserUnused.Selected.Count}개)"))
+            if (ImGui.Button($"체크 항목 인벤토리로 이동 ({stage3.Selected.Count}개)"))
             {
-                if (!cleanup.IsRunning && !armoryPreclean.IsRunning && !armoryMoveSell.IsMoving && !armoryMoveSell.IsSelling && !finalDisposition.IsRunning)
-                {
-                    dresserUnused.Start();
-                    status = dresserUnused.Status;
-                }
-                else
-                {
-                    status = "다른 정리 작업이 진행 중입니다.";
-                }
+                if (!AnyOtherRunning(stage3.IsRunning))
+                    stage3.Start();
             }
         }
         else
         {
-            ImGui.TextUnformatted($"4단계 진행: 복원 {dresserUnused.Restored} · 제외 {dresserUnused.Skipped} · 실패 {dresserUnused.Failed}");
+            ImGui.TextUnformatted($"진행: 이동 {stage3.Moved} · 제외 {stage3.Skipped} · 실패 {stage3.Failed}");
+            if (ImGui.Button("3단계 중지"))
+                stage3.Stop();
+        }
+
+        ImGui.TextWrapped($"상태: {stage3.Status}");
+        if (!string.IsNullOrWhiteSpace(stage3.LastItemStatus))
+            ImGui.TextWrapped($"최근 처리: {stage3.LastItemStatus}");
+
+        ImGui.BeginChild("Stage3List", new Vector2(0, 550), true);
+        foreach (var entry in stage3.Entries)
+        {
+            var selected = stage3.Selected.Contains(entry.Key);
+            var suffix = $" [Lv.{entry.RequiredLevel}]";
+            if (entry.IsCrafterGatherer) suffix += " [제작/채집]";
+            if (entry.IsDyed) suffix += " [염색됨]";
+            if (ImGui.Checkbox($"{entry.Name}{suffix}##s3-{entry.Key.Id}", ref selected))
+                stage3.SetSelected(entry.Key, selected);
+        }
+        ImGui.EndChild();
+    }
+
+    private void DrawStage4()
+    {
+        ImGui.TextWrapped("장비함과 일반 인벤토리의 장비를 체크해서 자동 파기합니다. 마테리아 장착 및 투영 여부는 무시합니다.");
+        ImGui.TextWrapped("파기 과정에서 확인 창이 뜨면 체크한 아이템에 대해 자동으로 '예'를 선택합니다.");
+
+        if (!stage4.IsRunning)
+        {
+            if (ImGui.Button("후보 검색##s4scan"))
+                stage4.Scan();
+            ImGui.SameLine();
+            if (ImGui.Button("전체 체크##s4all"))
+                stage4.SelectAll(true);
+            ImGui.SameLine();
+            if (ImGui.Button("전체 체크 해제##s4none"))
+                stage4.SelectAll(false);
+
+            if (ImGui.Button($"체크한 아이템 자동 파기 ({stage4.Selected.Count}개)"))
+            {
+                if (!AnyOtherRunning(stage4.IsRunning))
+                    stage4.Start();
+            }
+        }
+        else
+        {
+            ImGui.TextUnformatted($"진행: 파기 {stage4.Discarded} · 제외 {stage4.Skipped} · 실패 {stage4.Failed}");
             if (ImGui.Button("4단계 중지"))
-            {
-                dresserUnused.Stop();
-                status = dresserUnused.Status;
-            }
+                stage4.Stop();
         }
 
-        ImGui.TextWrapped($"상태: {dresserUnused.Status}");
-        if (!string.IsNullOrWhiteSpace(dresserUnused.LastItemStatus))
-            ImGui.TextWrapped($"최근 처리: {dresserUnused.LastItemStatus}");
+        ImGui.TextWrapped($"상태: {stage4.Status}");
+        if (!string.IsNullOrWhiteSpace(stage4.LastItemStatus))
+            ImGui.TextWrapped($"최근 처리: {stage4.LastItemStatus}");
 
-        ImGui.BeginChild("UnusedDresserList", new Vector2(0, 260), true);
-        foreach (var entry in dresserUnused.Entries)
+        ImGui.BeginChild("Stage4List", new Vector2(0, 590), true);
+        foreach (var entry in stage4.Entries)
         {
-            var selected = dresserUnused.Selected.Contains(entry.ItemId);
-            var suffix = entry.IsDyed ? " [염색]" : "";
-            if (ImGui.Checkbox($"{entry.Name}{suffix}##dresserunused{entry.ItemId}", ref selected))
-                dresserUnused.SetSelected(entry.ItemId, selected);
+            var selected = stage4.Selected.Contains(entry.Key);
+            var suffix = IsBag(entry.Key.Container) ? " [인벤토리]" : " [장비함]";
+            if (entry.IsDyed) suffix += " [염색됨]";
+            if (ImGui.Checkbox($"{entry.Name}{suffix}##s4-{entry.Key.Id}", ref selected))
+                stage4.SetSelected(entry.Key, selected);
         }
         ImGui.EndChild();
     }
 
-    private void DrawOptions()
-    {
-        if (!ImGui.CollapsingHeader("정리 옵션", ImGuiTreeNodeFlags.DefaultOpen))
-            return;
+    private bool AnyOtherRunning(bool currentRunning)
+        => !currentRunning && AnyRunning;
 
-        var includeCraftingPreclean = config.IncludeCraftingGearInArmoryPreclean;
-        if (ImGui.Checkbox("1단계에서 제작직 전용 장비도 추억의 보관함에 넣기", ref includeCraftingPreclean))
-        {
-            armoryPreclean.UpdateSettings(includeCraftingPreclean, config.ArmoryStoreIntervalMs);
-            armoryPreclean.Scan();
-        }
-
-        var armoryInterval = config.ArmoryStoreIntervalMs;
-        if (ImGui.SliderInt("장비함 → 보관함 처리 간격 (ms)", ref armoryInterval, 300, 3000))
-            armoryPreclean.UpdateSettings(config.IncludeCraftingGearInArmoryPreclean, armoryInterval);
-
-        var includeCraftingMove = config.IncludeCraftingGearInArmoryMove;
-        if (ImGui.Checkbox("옵션 목록에 제작직 전용 장비도 포함", ref includeCraftingMove))
-        {
-            armoryMoveSell.UpdateSettings(includeCraftingMove, config.ArmoryMoveIntervalMs, config.VendorSellIntervalMs);
-            armoryMoveSell.Scan();
-        }
-
-        var moveInterval = config.ArmoryMoveIntervalMs;
-        if (ImGui.SliderInt("장비함 → 인벤토리 이동 간격 (ms)", ref moveInterval, 300, 3000))
-            armoryMoveSell.UpdateSettings(config.IncludeCraftingGearInArmoryMove, moveInterval, config.VendorSellIntervalMs);
-
-        var sellInterval = config.VendorSellIntervalMs;
-        if (ImGui.SliderInt("상점 판매 간격 (ms)", ref sellInterval, 400, 3000))
-            armoryMoveSell.UpdateSettings(config.IncludeCraftingGearInArmoryMove, config.ArmoryMoveIntervalMs, sellInterval);
-
-        var interval = config.RestoreIntervalMs;
-        if (ImGui.SliderInt("환상의 옷장 복원 간격 (ms)", ref interval, 300, 3000))
-            cleanup.UpdateSettings(interval, config.ReserveFreeSlots, config.AutoDepositToArmoire);
-
-        var reserve = config.ReserveFreeSlots;
-        if (ImGui.SliderInt("복원 중 남겨둘 가방 빈칸", ref reserve, 0, 30))
-            cleanup.UpdateSettings(config.RestoreIntervalMs, reserve, config.AutoDepositToArmoire);
-
-        if (!config.IncludeCraftingGearInArmoryPreclean)
-        {
-            if (config.AutoDepositToArmoire)
-                cleanup.UpdateSettings(config.RestoreIntervalMs, config.ReserveFreeSlots, false);
-
-            ImGui.TextDisabled("AutoRetainer 자동 보관: 제작직 장비 제외가 켜져 있어 비활성화됨");
-            ImGui.TextWrapped("AutoRetainer의 /autoretainer armoire는 장비함까지 함께 처리할 수 있어 제작직 제외 설정과 충돌할 수 있습니다.");
-        }
-        else
-        {
-            var autoDeposit = config.AutoDepositToArmoire;
-            if (ImGui.Checkbox("환상의 옷장 복원 완료 후 AutoRetainer로 자동 보관", ref autoDeposit))
-                cleanup.UpdateSettings(config.RestoreIntervalMs, config.ReserveFreeSlots, autoDeposit);
-        }
-
-        var showIds = config.ShowIds;
-        if (ImGui.Checkbox("목록에 아이템 ID 표시", ref showIds))
-        {
-            config.ShowIds = showIds;
-            SaveConfig();
-        }
-
-        ImGui.TextWrapped("제작직 전용 장비 판정은 목수·대장장이·갑주제작사·보석공예가·가죽공예가·재봉사·연금술사·요리사만 사용 가능한 장비 기준입니다. 전 직업 공용 의상은 제작직 전용으로 취급하지 않습니다.");
-    }
-
-    private void DrawDresserCandidates()
-    {
-        if (!ImGui.CollapsingHeader("환상의 옷장 정리 후보"))
-            return;
-
-        ImGui.BeginChild("DresserCandidates", new Vector2(0, 250), true);
-
-        if (plateResult.PlateDataReady)
-        {
-            foreach (var item in plateResult.Eligible)
-            {
-                var candidate = item.Candidate;
-                var reason = item.UsedOnPlate ? " [투영세트 사용/무염색]" : " [투영세트 미사용]";
-                if (candidate.AlreadyInArmoire) reason += " [보관함 등록됨]";
-                else reason += " [보관함 미등록]";
-                if (item.SourceDyed) reason += " [원본 염색 있음]";
-                var label = config.ShowIds
-                    ? $"{candidate.Name} [{candidate.ItemId}]{reason}"
-                    : $"{candidate.Name}{reason}";
-                ImGui.TextUnformatted(label);
-            }
-        }
-        else
-        {
-            foreach (var candidate in scan.Candidates)
-            {
-                var label = config.ShowIds ? $"{candidate.Name} [{candidate.ItemId}]" : candidate.Name;
-                ImGui.TextUnformatted(label);
-            }
-        }
-
-        ImGui.EndChild();
-    }
-
-    private void DrawDiagnostics()
-    {
-        if (!ImGui.CollapsingHeader("진단 도구"))
-            return;
-
-        var cal = config.CalibrationMode;
-        if (ImGui.Checkbox("게임 UI 이벤트 기록", ref cal))
-        {
-            config.CalibrationMode = cal;
-            recorder.SetEnabled(cal);
-            SaveConfig();
-        }
-
-        if (selectedIndex >= 0 && selectedIndex < scan.Candidates.Count)
-        {
-            var candidate = scan.Candidates[selectedIndex];
-            if (ImGui.Button($"선택 항목 진단 준비: {candidate.Name}"))
-            {
-                recorder.Arm(candidate);
-                config.CalibrationMode = true;
-                recorder.SetEnabled(true);
-                SaveConfig();
-                status = $"{candidate.Name} 진단 준비 완료. 이 아이템을 수동 복원한 뒤 진단 파일을 내보내세요.";
-            }
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("진단 파일 내보내기"))
-        {
-            try
-            {
-                var path = exporter.Export(scan, recorder.Traces);
-                status = "진단 파일 저장 완료: " + path;
-                Chat.Print("[히메짱 옷장 정리기] 진단 파일 저장: " + path);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[KWC] 진단 파일 저장 실패");
-                status = "진단 파일 저장 실패: " + ex.Message;
-            }
-        }
-
-        ImGui.TextUnformatted($"기록된 UI 이벤트: {recorder.Traces.Count}");
-    }
+    private static bool IsBag(FFXIVClientStructs.FFXIV.Client.Game.InventoryType type)
+        => type is FFXIVClientStructs.FFXIV.Client.Game.InventoryType.Inventory1
+            or FFXIVClientStructs.FFXIV.Client.Game.InventoryType.Inventory2
+            or FFXIVClientStructs.FFXIV.Client.Game.InventoryType.Inventory3
+            or FFXIVClientStructs.FFXIV.Client.Game.InventoryType.Inventory4;
 }
