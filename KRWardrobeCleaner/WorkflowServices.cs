@@ -568,8 +568,17 @@ public sealed unsafe class Stage2InventoryToDresser
                 if (!existing.TryGetValue(set.RowId, out var boxIndex))
                     continue;
 
-                var slot = IndexOf(set.ItemIds, entry.ItemId);
-                if (slot >= 0 && !manager->IsSetSlotUnlocked(boxIndex, slot))
+                var canFill = false;
+                for (var slot = 0; slot < set.ItemIds.Count && slot < 9; slot++)
+                {
+                    if (set.ItemIds[slot] == entry.ItemId && !manager->IsSetSlotUnlocked(boxIndex, slot))
+                    {
+                        canFill = true;
+                        break;
+                    }
+                }
+
+                if (canFill)
                 {
                     selected.Add(entry.Key);
                     break;
@@ -615,7 +624,7 @@ public sealed unsafe class Stage2InventoryToDresser
 
         foreach (var set in outfits.All.OrderBy(x => x.Name, StringComparer.CurrentCulture))
         {
-            var batch = new List<PhysicalGearEntry>();
+            var batch = new List<SetPiece>();
             var localUsed = new HashSet<ItemLocationKey>();
 
             for (var slotIndex = 0; slotIndex < set.ItemIds.Count && slotIndex < 9; slotIndex++)
@@ -636,7 +645,7 @@ public sealed unsafe class Stage2InventoryToDresser
                 if (piece is null)
                     continue;
 
-                batch.Add(piece);
+                batch.Add(new(piece, slotIndex));
                 localUsed.Add(piece.Key);
             }
 
@@ -647,13 +656,13 @@ public sealed unsafe class Stage2InventoryToDresser
             {
                 setQueue.Enqueue(new(set, batch, existingIndex));
                 foreach (var piece in batch)
-                    consumed.Add(piece.Key);
+                    consumed.Add(piece.Entry.Key);
             }
             else if (!existingOnly && batch.Count >= 2)
             {
                 setQueue.Enqueue(new(set, batch, null));
                 foreach (var piece in batch)
-                    consumed.Add(piece.Key);
+                    consumed.Add(piece.Entry.Key);
             }
         }
 
@@ -741,12 +750,13 @@ public sealed unsafe class Stage2InventoryToDresser
         slots.Clear();
 
         var filled = 0;
-        foreach (var piece in batch.Pieces)
+        foreach (var setPiece in batch.Pieces)
         {
+            var piece = setPiece.Entry;
+            var slot = setPiece.SetSlot;
+
             if (!scanner.TryResolve(piece.Key, piece.ItemId, out _))
                 continue;
-
-            var slot = IndexOf(batch.Set.ItemIds, piece.ItemId);
             if (slot < 0 || slot >= 9)
                 continue;
             if (batch.ExistingIndex is uint idx && manager->IsSetSlotUnlocked(idx, slot))
@@ -954,7 +964,8 @@ public sealed unsafe class Stage2InventoryToDresser
 
     private static uint Normalize(uint id) => id >= 1_000_000 ? id % 1_000_000 : id;
 
-    private sealed record SetBatch(OutfitCatalog.SetInfo Set, IReadOnlyList<PhysicalGearEntry> Pieces, uint? ExistingIndex);
+    private sealed record SetPiece(PhysicalGearEntry Entry, int SetSlot);
+    private sealed record SetBatch(OutfitCatalog.SetInfo Set, IReadOnlyList<SetPiece> Pieces, uint? ExistingIndex);
     private enum SingleStoreState { None, Select, Confirm, Wait }
 }
 
