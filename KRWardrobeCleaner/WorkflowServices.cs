@@ -30,6 +30,16 @@ public sealed record DresserArmoireEntry(
     bool IsDyed,
     bool UsedOnPlate);
 
+public sealed record DiscardEntry(
+    ItemLocationKey Key,
+    uint ItemId,
+    string Name,
+    int Quantity,
+    bool IsEquipment,
+    int RequiredLevel,
+    bool IsCrafterGatherer,
+    bool IsDyed);
+
 public sealed unsafe class InventoryScanner
 {
     public static readonly InventoryType[] ArmoryContainers =
@@ -106,6 +116,42 @@ public sealed unsafe class InventoryScanner
             .ThenBy(x => (int)x.Key.Container)
             .ThenBy(x => x.Key.Slot)
             .ToList();
+    }
+
+    public List<DiscardEntry> ScanContainerAll(InventoryType type)
+    {
+        var result = new List<DiscardEntry>();
+        var inventory = InventoryManager.Instance();
+        if (inventory == null)
+            return result;
+
+        var container = inventory->GetInventoryContainer(type);
+        if (container == null || !container->IsLoaded)
+            return result;
+
+        for (var slotIndex = 0; slotIndex < container->Size; slotIndex++)
+        {
+            var item = container->GetInventorySlot(slotIndex);
+            if (item == null || item->ItemId == 0)
+                continue;
+
+            var itemId = item->GetBaseItemId();
+            if (itemId == 0)
+                continue;
+
+            var equipment = excel.IsEquipment(itemId);
+            result.Add(new(
+                new(type, slotIndex),
+                itemId,
+                excel.NameOf(itemId),
+                item->Quantity,
+                equipment,
+                equipment ? excel.RequiredLevelOf(itemId) : 0,
+                equipment && excel.IsCrafterGathererOnly(itemId),
+                item->Stains[0] != 0 || item->Stains[1] != 0));
+        }
+
+        return result.OrderBy(x => x.Key.Slot).ToList();
     }
 
     public bool TryResolve(ItemLocationKey key, uint expectedItemId, out InventoryItem* item)
@@ -317,8 +363,9 @@ public sealed unsafe class Stage1DresserToInventory
         if (index >= queue.Count)
         {
             IsRunning = false;
-            Status = $"완료: 복원 {Restored} · 제외 {Skipped} · 실패 {Failed}";
+            var completed = $"완료: 복원 {Restored} · 제외 {Skipped} · 실패 {Failed}";
             Scan();
+            Status = completed;
             return;
         }
 
@@ -433,6 +480,7 @@ public sealed unsafe class Stage2InventoryToDresser
 
     private PhysicalGearEntry? pendingSingle;
     private long pendingSingleAt;
+    private long nextSetActionAt;
     private SingleStoreState singleState;
 
     public IReadOnlyList<PhysicalGearEntry> Entries => entries;
@@ -520,8 +568,17 @@ public sealed unsafe class Stage2InventoryToDresser
                 if (!existing.TryGetValue(set.RowId, out var boxIndex))
                     continue;
 
-                var slot = IndexOf(set.ItemIds, entry.ItemId);
-                if (slot >= 0 && !manager->IsSetSlotUnlocked(boxIndex, slot))
+                var canFill = false;
+                for (var slot = 0; slot < set.ItemIds.Count && slot < 9; slot++)
+                {
+                    if (set.ItemIds[slot] == entry.ItemId && !manager->IsSetSlotUnlocked(boxIndex, slot))
+                    {
+                        canFill = true;
+                        break;
+                    }
+                }
+
+                if (canFill)
                 {
                     selected.Add(entry.Key);
                     break;
@@ -558,6 +615,7 @@ public sealed unsafe class Stage2InventoryToDresser
         setQueue.Clear();
         singleQueue.Clear();
         pendingSingle = null;
+        nextSetActionAt = 0;
         singleState = SingleStoreState.None;
 
         var manager = MirageManager.Instance()!;
@@ -566,39 +624,45 @@ public sealed unsafe class Stage2InventoryToDresser
 
         foreach (var set in outfits.All.OrderBy(x => x.Name, StringComparer.CurrentCulture))
         {
-            var pieces = chosen
-                .Where(x => !consumed.Contains(x.Key) && set.ItemIds.Contains(x.ItemId))
-                .ToList();
-            if (pieces.Count == 0) continue;
+            var batch = new List<SetPiece>();
+            var localUsed = new HashSet<ItemLocationKey>();
+
+            for (var slotIndex = 0; slotIndex < set.ItemIds.Count && slotIndex < 9; slotIndex++)
+            {
+                var requiredId = set.ItemIds[slotIndex];
+                if (requiredId == 0)
+                    continue;
+
+                if (existing.TryGetValue(set.RowId, out var existingIndexForSlot) &&
+                    manager->IsSetSlotUnlocked(existingIndexForSlot, slotIndex))
+                    continue;
+
+                var piece = chosen.FirstOrDefault(x =>
+                    x.ItemId == requiredId &&
+                    !consumed.Contains(x.Key) &&
+                    !localUsed.Contains(x.Key));
+
+                if (piece is null)
+                    continue;
+
+                batch.Add(new(piece, slotIndex));
+                localUsed.Add(piece.Key);
+            }
+
+            if (batch.Count == 0)
+                continue;
 
             if (existing.TryGetValue(set.RowId, out var existingIndex))
             {
-                var missing = pieces.Where(piece =>
-                {
-                    var slot = IndexOf(set.ItemIds, piece.ItemId);
-                    return slot >= 0 && !manager->IsSetSlotUnlocked(existingIndex, slot);
-                }).ToList();
-
-                if (missing.Count > 0)
-                {
-                    setQueue.Enqueue(new(set, missing, existingIndex));
-                    foreach (var piece in missing) consumed.Add(piece.Key);
-                }
+                setQueue.Enqueue(new(set, batch, existingIndex));
+                foreach (var piece in batch)
+                    consumed.Add(piece.Entry.Key);
             }
-            else if (!existingOnly)
+            else if (!existingOnly && batch.Count >= 2)
             {
-                var uniqueIds = pieces.Select(x => x.ItemId).Distinct().ToHashSet();
-                if (uniqueIds.Count >= 2)
-                {
-                    var batch = new List<PhysicalGearEntry>();
-                    foreach (var id in uniqueIds)
-                    {
-                        var piece = pieces.First(x => x.ItemId == id);
-                        batch.Add(piece);
-                        consumed.Add(piece.Key);
-                    }
-                    setQueue.Enqueue(new(set, batch, null));
-                }
+                setQueue.Enqueue(new(set, batch, null));
+                foreach (var piece in batch)
+                    consumed.Add(piece.Entry.Key);
             }
         }
 
@@ -646,6 +710,9 @@ public sealed unsafe class Stage2InventoryToDresser
             return;
         }
 
+        if (Environment.TickCount64 < nextSetActionAt)
+            return;
+
         if (setQueue.TryDequeue(out var batch))
         {
             StoreSetBatch(batch);
@@ -662,8 +729,9 @@ public sealed unsafe class Stage2InventoryToDresser
         }
 
         IsRunning = false;
-        Status = $"완료: 저장 {Stored} · 제외 {Skipped} · 실패 {Failed}";
+        var completed = $"완료: 저장 {Stored} · 제외 {Skipped} · 실패 {Failed}";
         Scan();
+        Status = completed;
     }
 
     private void StoreSetBatch(SetBatch batch)
@@ -682,19 +750,20 @@ public sealed unsafe class Stage2InventoryToDresser
         slots.Clear();
 
         var filled = 0;
-        foreach (var piece in batch.Pieces)
+        foreach (var setPiece in batch.Pieces)
         {
+            var piece = setPiece.Entry;
+            var slot = setPiece.SetSlot;
+
             if (!scanner.TryResolve(piece.Key, piece.ItemId, out _))
                 continue;
-
-            var slot = IndexOf(batch.Set.ItemIds, piece.ItemId);
             if (slot < 0 || slot >= 9)
                 continue;
             if (batch.ExistingIndex is uint idx && manager->IsSetSlotUnlocked(idx, slot))
                 continue;
 
-            containers[slot] = piece.Key.Container;
-            slots[slot] = (ushort)piece.Key.Slot;
+            containers[filled] = piece.Key.Container;
+            slots[filled] = (ushort)piece.Key.Slot;
             filled++;
         }
 
@@ -725,6 +794,8 @@ public sealed unsafe class Stage2InventoryToDresser
             Failed += filled;
             LastItemStatus = $"{batch.Set.Name}: 세트 저장 요청이 거절되었습니다.";
         }
+
+        nextSetActionAt = Environment.TickCount64 + 700;
     }
 
     private void TickSingle()
@@ -792,11 +863,8 @@ public sealed unsafe class Stage2InventoryToDresser
             }
 
             case SingleStoreState.Confirm:
-                if (IsAddonReady("SelectYesno"))
-                {
-                    FireCallback("SelectYesno", 0);
+                if (TryConfirmYesNoForItem(entry.Name))
                     singleState = SingleStoreState.Wait;
-                }
                 return;
 
             case SingleStoreState.Wait:
@@ -867,6 +935,26 @@ public sealed unsafe class Stage2InventoryToDresser
         return true;
     }
 
+    private bool TryConfirmYesNoForItem(string expectedItemName)
+    {
+        for (var i = 1; i <= 4; i++)
+        {
+            var yesno = (AddonSelectYesno*)gameGui.GetAddonByName("SelectYesno", i).Address;
+            if (yesno == null || !yesno->AtkUnitBase.IsVisible || !yesno->AtkUnitBase.IsReady)
+                continue;
+
+            var prompt = yesno->PromptText == null ? string.Empty : yesno->PromptText->NodeText.ToString();
+            if (string.IsNullOrWhiteSpace(prompt) ||
+                !prompt.Contains(expectedItemName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            yesno->AtkUnitBase.FireCallbackInt(0);
+            return true;
+        }
+
+        return false;
+    }
+
     private static int IndexOf(IReadOnlyList<uint> list, uint value)
     {
         for (var i = 0; i < list.Count; i++)
@@ -876,7 +964,8 @@ public sealed unsafe class Stage2InventoryToDresser
 
     private static uint Normalize(uint id) => id >= 1_000_000 ? id % 1_000_000 : id;
 
-    private sealed record SetBatch(OutfitCatalog.SetInfo Set, IReadOnlyList<PhysicalGearEntry> Pieces, uint? ExistingIndex);
+    private sealed record SetPiece(PhysicalGearEntry Entry, int SetSlot);
+    private sealed record SetBatch(OutfitCatalog.SetInfo Set, IReadOnlyList<SetPiece> Pieces, uint? ExistingIndex);
     private enum SingleStoreState { None, Select, Confirm, Wait }
 }
 
@@ -992,8 +1081,9 @@ public sealed unsafe class Stage3ArmoryToInventory
         if (!queue.TryDequeue(out var entry))
         {
             IsRunning = false;
-            Status = $"완료: 이동 {Moved} · 제외 {Skipped} · 실패 {Failed}";
+            var completed = $"완료: 이동 {Moved} · 제외 {Skipped} · 실패 {Failed}";
             Scan();
+            Status = completed;
             return;
         }
 
@@ -1018,7 +1108,7 @@ public sealed unsafe class Stage3ArmoryToInventory
         else
         {
             var rc = inventory->MoveItemSlot(entry.Key.Container, (ushort)entry.Key.Slot, destination.Container, (ushort)destination.Slot, true);
-            if (rc >= 0)
+            if (rc == 0)
             {
                 Moved++;
                 LastItemStatus = $"{entry.Name}: 인벤토리 이동 요청 완료.";
@@ -1039,27 +1129,41 @@ public sealed unsafe class Stage4Discard
 {
     private readonly InventoryScanner scanner;
     private readonly IGameGui gameGui;
+    private readonly Configuration config;
+    private readonly System.Action saveConfig;
+
     private readonly List<PhysicalGearEntry> entries = [];
     private readonly HashSet<ItemLocationKey> selected = [];
-    private readonly Queue<PhysicalGearEntry> queue = new();
+    private readonly Queue<DiscardEntry> queue = new();
 
-    private PhysicalGearEntry? pending;
+    private DiscardEntry? pending;
     private long pendingAt;
     private long nextAt;
+    private DiscardMode mode;
 
     public IReadOnlyList<PhysicalGearEntry> Entries => entries;
     public IReadOnlySet<ItemLocationKey> Selected => selected;
     public bool IsRunning { get; private set; }
+    public bool IsBag4Mode => IsRunning && mode == DiscardMode.Inventory4All;
     public int Discarded { get; private set; }
     public int Skipped { get; private set; }
     public int Failed { get; private set; }
     public string Status { get; private set; } = "파기 후보를 검색해 주세요.";
     public string? LastItemStatus { get; private set; }
 
-    public Stage4Discard(InventoryScanner scanner, IGameGui gameGui)
+    public Stage4Discard(InventoryScanner scanner, IGameGui gameGui, Configuration config, System.Action saveConfig)
     {
         this.scanner = scanner;
         this.gameGui = gameGui;
+        this.config = config;
+        this.saveConfig = saveConfig;
+    }
+
+    public void UpdateSmartSettings(bool includeCrafterGatherer, int maxLevel)
+    {
+        config.Stage4SmartIncludeCrafterGatherer = includeCrafterGatherer;
+        config.Stage4SmartMaxLevel = Math.Clamp(maxLevel, 1, 100);
+        saveConfig();
     }
 
     public int Scan()
@@ -1086,23 +1190,57 @@ public sealed unsafe class Stage4Discard
             selected.Add(entry.Key);
     }
 
-    public bool Start()
+    public void SmartSelect()
+    {
+        selected.Clear();
+        foreach (var entry in entries)
+        {
+            if (entry.RequiredLevel > config.Stage4SmartMaxLevel)
+                continue;
+            if (entry.IsCrafterGatherer && !config.Stage4SmartIncludeCrafterGatherer)
+                continue;
+            selected.Add(entry.Key);
+        }
+
+        Status = $"스마트 선택 완료: {selected.Count}개.";
+    }
+
+    public int PreviewInventory4Count()
+        => scanner.ScanContainerAll(InventoryType.Inventory4).Count;
+
+    public bool StartSelected()
     {
         if (IsRunning) return false;
-        var chosen = entries.Where(x => selected.Contains(x.Key)).ToList();
+
+        var chosen = entries
+            .Where(x => selected.Contains(x.Key))
+            .Select(ToDiscardEntry)
+            .ToList();
+
         if (chosen.Count == 0)
         {
             Status = "파기할 아이템을 체크해 주세요.";
             return false;
         }
 
-        queue.Clear();
-        foreach (var entry in chosen) queue.Enqueue(entry);
-        Discarded = Skipped = Failed = 0;
-        pending = null;
-        nextAt = 0;
-        IsRunning = true;
+        PrepareQueue(chosen, DiscardMode.SelectedGear);
         Status = $"체크한 장비 {queue.Count}개를 순차 파기합니다.";
+        return true;
+    }
+
+    public bool StartInventory4All()
+    {
+        if (IsRunning) return false;
+
+        var chosen = scanner.ScanContainerAll(InventoryType.Inventory4);
+        if (chosen.Count == 0)
+        {
+            Status = "4번 인벤토리가 비어 있습니다.";
+            return false;
+        }
+
+        PrepareQueue(chosen, DiscardMode.Inventory4All);
+        Status = $"4번 인벤토리의 모든 아이템 {queue.Count}개 슬롯을 순차 파기합니다.";
         return true;
     }
 
@@ -1110,6 +1248,8 @@ public sealed unsafe class Stage4Discard
     {
         IsRunning = false;
         pending = null;
+        queue.Clear();
+        mode = DiscardMode.None;
         Status = reason;
     }
 
@@ -1143,8 +1283,10 @@ public sealed unsafe class Stage4Discard
         if (!queue.TryDequeue(out var entry))
         {
             IsRunning = false;
-            Status = $"완료: 파기 {Discarded} · 제외 {Skipped} · 실패 {Failed}";
+            var completed = $"완료: 파기 {Discarded} · 제외 {Skipped} · 실패 {Failed}";
+            mode = DiscardMode.None;
             Scan();
+            Status = completed;
             return;
         }
 
@@ -1152,6 +1294,7 @@ public sealed unsafe class Stage4Discard
         {
             Skipped++;
             LastItemStatus = $"{entry.Name}: 위치가 바뀌어 건너뜁니다.";
+            nextAt = now + 250;
             return;
         }
 
@@ -1163,7 +1306,7 @@ public sealed unsafe class Stage4Discard
         }
 
         var rc = inventory->DiscardItem(entry.Key.Container, (ushort)entry.Key.Slot);
-        if (rc < 0)
+        if (rc != 0)
         {
             Failed++;
             LastItemStatus = $"{entry.Name}: 파기 요청이 거절되었습니다. ({rc})";
@@ -1177,8 +1320,25 @@ public sealed unsafe class Stage4Discard
         Status = $"파기 진행: 완료 {Discarded} · 제외 {Skipped} · 실패 {Failed} · 남음 {queue.Count + 1}";
     }
 
-    private void AutoConfirmDiscard(PhysicalGearEntry expected)
+    private void PrepareQueue(IEnumerable<DiscardEntry> chosen, DiscardMode discardMode)
     {
+        queue.Clear();
+        foreach (var entry in chosen)
+            queue.Enqueue(entry);
+
+        Discarded = Skipped = Failed = 0;
+        pending = null;
+        nextAt = 0;
+        LastItemStatus = null;
+        mode = discardMode;
+        IsRunning = true;
+    }
+
+    private void AutoConfirmDiscard(DiscardEntry expected)
+    {
+        if (Environment.TickCount64 - pendingAt > 3000)
+            return;
+
         for (var i = 1; i <= 4; i++)
         {
             var yesno = (AddonSelectYesno*)gameGui.GetAddonByName("SelectYesno", i).Address;
@@ -1186,7 +1346,7 @@ public sealed unsafe class Stage4Discard
                 continue;
 
             var prompt = yesno->PromptText == null ? string.Empty : yesno->PromptText->NodeText.ToString();
-            if (!string.IsNullOrWhiteSpace(prompt) &&
+            if (string.IsNullOrWhiteSpace(prompt) ||
                 !prompt.Contains(expected.Name, StringComparison.OrdinalIgnoreCase))
                 continue;
 
@@ -1194,4 +1354,23 @@ public sealed unsafe class Stage4Discard
             return;
         }
     }
+
+    private static DiscardEntry ToDiscardEntry(PhysicalGearEntry entry)
+        => new(
+            entry.Key,
+            entry.ItemId,
+            entry.Name,
+            1,
+            true,
+            entry.RequiredLevel,
+            entry.IsCrafterGatherer,
+            entry.IsDyed);
+
+    private enum DiscardMode
+    {
+        None,
+        SelectedGear,
+        Inventory4All,
+    }
 }
+

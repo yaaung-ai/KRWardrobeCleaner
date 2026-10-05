@@ -26,15 +26,8 @@ public sealed unsafe class GlamourStateCache
         if (manager == null)
             return;
 
-        if (!manager->PrismBoxRequested &&
-            !manager->PrismBoxLoaded &&
-            !manager->GlamourPlatesRequested &&
-            !manager->GlamourPlatesLoaded)
-        {
-            Clear();
-            return;
-        }
-
+        // 두 UI가 모두 닫힌 짧은 구간에도 마지막으로 정상 캡처한 캐시는 유지한다.
+        // 그래야 투영세트 화면을 먼저 열고 닫은 뒤 환상의 옷장을 열어도 1단계 판정에 사용할 수 있다.
         if (manager->GlamourPlatesLoaded)
             CapturePlates(manager);
 
