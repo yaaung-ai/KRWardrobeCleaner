@@ -606,6 +606,7 @@ public sealed unsafe class Stage2InventoryToDresser
         setQueue.Clear();
         singleQueue.Clear();
         pendingSingle = null;
+        nextSetActionAt = 0;
         singleState = SingleStoreState.None;
 
         var manager = MirageManager.Instance()!;
@@ -614,39 +615,45 @@ public sealed unsafe class Stage2InventoryToDresser
 
         foreach (var set in outfits.All.OrderBy(x => x.Name, StringComparer.CurrentCulture))
         {
-            var pieces = chosen
-                .Where(x => !consumed.Contains(x.Key) && set.ItemIds.Contains(x.ItemId))
-                .ToList();
-            if (pieces.Count == 0) continue;
+            var batch = new List<PhysicalGearEntry>();
+            var localUsed = new HashSet<ItemLocationKey>();
+
+            for (var slotIndex = 0; slotIndex < set.ItemIds.Count && slotIndex < 9; slotIndex++)
+            {
+                var requiredId = set.ItemIds[slotIndex];
+                if (requiredId == 0)
+                    continue;
+
+                if (existing.TryGetValue(set.RowId, out var existingIndexForSlot) &&
+                    manager->IsSetSlotUnlocked(existingIndexForSlot, slotIndex))
+                    continue;
+
+                var piece = chosen.FirstOrDefault(x =>
+                    x.ItemId == requiredId &&
+                    !consumed.Contains(x.Key) &&
+                    !localUsed.Contains(x.Key));
+
+                if (piece is null)
+                    continue;
+
+                batch.Add(piece);
+                localUsed.Add(piece.Key);
+            }
+
+            if (batch.Count == 0)
+                continue;
 
             if (existing.TryGetValue(set.RowId, out var existingIndex))
             {
-                var missing = pieces.Where(piece =>
-                {
-                    var slot = IndexOf(set.ItemIds, piece.ItemId);
-                    return slot >= 0 && !manager->IsSetSlotUnlocked(existingIndex, slot);
-                }).ToList();
-
-                if (missing.Count > 0)
-                {
-                    setQueue.Enqueue(new(set, missing, existingIndex));
-                    foreach (var piece in missing) consumed.Add(piece.Key);
-                }
+                setQueue.Enqueue(new(set, batch, existingIndex));
+                foreach (var piece in batch)
+                    consumed.Add(piece.Key);
             }
-            else if (!existingOnly)
+            else if (!existingOnly && batch.Count >= 2)
             {
-                var uniqueIds = pieces.Select(x => x.ItemId).Distinct().ToHashSet();
-                if (uniqueIds.Count >= 2)
-                {
-                    var batch = new List<PhysicalGearEntry>();
-                    foreach (var id in uniqueIds)
-                    {
-                        var piece = pieces.First(x => x.ItemId == id);
-                        batch.Add(piece);
-                        consumed.Add(piece.Key);
-                    }
-                    setQueue.Enqueue(new(set, batch, null));
-                }
+                setQueue.Enqueue(new(set, batch, null));
+                foreach (var piece in batch)
+                    consumed.Add(piece.Key);
             }
         }
 
