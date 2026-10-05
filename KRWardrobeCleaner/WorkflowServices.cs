@@ -480,6 +480,7 @@ public sealed unsafe class Stage2InventoryToDresser
 
     private PhysicalGearEntry? pendingSingle;
     private long pendingSingleAt;
+    private long nextSetActionAt;
     private SingleStoreState singleState;
 
     public IReadOnlyList<PhysicalGearEntry> Entries => entries;
@@ -693,6 +694,9 @@ public sealed unsafe class Stage2InventoryToDresser
             return;
         }
 
+        if (Environment.TickCount64 < nextSetActionAt)
+            return;
+
         if (setQueue.TryDequeue(out var batch))
         {
             StoreSetBatch(batch);
@@ -773,6 +777,8 @@ public sealed unsafe class Stage2InventoryToDresser
             Failed += filled;
             LastItemStatus = $"{batch.Set.Name}: 세트 저장 요청이 거절되었습니다.";
         }
+
+        nextSetActionAt = Environment.TickCount64 + 700;
     }
 
     private void TickSingle()
@@ -1067,7 +1073,7 @@ public sealed unsafe class Stage3ArmoryToInventory
         else
         {
             var rc = inventory->MoveItemSlot(entry.Key.Container, (ushort)entry.Key.Slot, destination.Container, (ushort)destination.Slot, true);
-            if (rc >= 0)
+            if (rc == 0)
             {
                 Moved++;
                 LastItemStatus = $"{entry.Name}: 인벤토리 이동 요청 완료.";
@@ -1265,7 +1271,7 @@ public sealed unsafe class Stage4Discard
         }
 
         var rc = inventory->DiscardItem(entry.Key.Container, (ushort)entry.Key.Slot);
-        if (rc < 0)
+        if (rc != 0)
         {
             Failed++;
             LastItemStatus = $"{entry.Name}: 파기 요청이 거절되었습니다. ({rc})";
