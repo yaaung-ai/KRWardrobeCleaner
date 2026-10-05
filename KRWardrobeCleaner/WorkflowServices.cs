@@ -853,11 +853,8 @@ public sealed unsafe class Stage2InventoryToDresser
             }
 
             case SingleStoreState.Confirm:
-                if (IsAddonReady("SelectYesno"))
-                {
-                    FireCallback("SelectYesno", 0);
+                if (TryConfirmYesNoForItem(entry.Name))
                     singleState = SingleStoreState.Wait;
-                }
                 return;
 
             case SingleStoreState.Wait:
@@ -926,6 +923,26 @@ public sealed unsafe class Stage2InventoryToDresser
             atk[i].SetInt(values[i]);
         addon->FireCallback((uint)values.Length, atk);
         return true;
+    }
+
+    private bool TryConfirmYesNoForItem(string expectedItemName)
+    {
+        for (var i = 1; i <= 4; i++)
+        {
+            var yesno = (AddonSelectYesno*)gameGui.GetAddonByName("SelectYesno", i).Address;
+            if (yesno == null || !yesno->AtkUnitBase.IsVisible || !yesno->AtkUnitBase.IsReady)
+                continue;
+
+            var prompt = yesno->PromptText == null ? string.Empty : yesno->PromptText->NodeText.ToString();
+            if (string.IsNullOrWhiteSpace(prompt) ||
+                !prompt.Contains(expectedItemName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            yesno->AtkUnitBase.FireCallbackInt(0);
+            return true;
+        }
+
+        return false;
     }
 
     private static int IndexOf(IReadOnlyList<uint> list, uint value)
