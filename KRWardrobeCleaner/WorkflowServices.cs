@@ -171,7 +171,7 @@ public sealed unsafe class Stage1DresserToInventory
     private readonly GlamourStateCache glamourCache;
     private readonly IGameGui gameGui;
     private readonly Configuration config;
-    private readonly Action saveConfig;
+    private readonly System.Action saveConfig;
     private readonly List<DresserArmoireEntry> entries = [];
     private readonly HashSet<int> selected = [];
     private readonly List<(int Slot, uint ItemId)> queue = [];
@@ -187,7 +187,7 @@ public sealed unsafe class Stage1DresserToInventory
     public string Status { get; private set; } = "환상의 옷장을 연 뒤 검색해 주세요.";
     public string? LastItemStatus { get; private set; }
 
-    public Stage1DresserToInventory(ExcelIndex excel, GlamourStateCache glamourCache, IGameGui gameGui, Configuration config, Action saveConfig)
+    public Stage1DresserToInventory(ExcelIndex excel, GlamourStateCache glamourCache, IGameGui gameGui, Configuration config, System.Action saveConfig)
     {
         this.excel = excel;
         this.glamourCache = glamourCache;
@@ -424,7 +424,7 @@ public sealed unsafe class Stage2InventoryToDresser
     private readonly OutfitCatalog outfits;
     private readonly IGameGui gameGui;
     private readonly Configuration config;
-    private readonly Action saveConfig;
+    private readonly System.Action saveConfig;
 
     private readonly List<PhysicalGearEntry> entries = [];
     private readonly HashSet<ItemLocationKey> selected = [];
@@ -444,7 +444,7 @@ public sealed unsafe class Stage2InventoryToDresser
     public string Status { get; private set; } = "환상의 옷장을 연 뒤 후보를 검색해 주세요.";
     public string? LastItemStatus { get; private set; }
 
-    public Stage2InventoryToDresser(ExcelIndex excel, InventoryScanner scanner, OutfitCatalog outfits, IGameGui gameGui, Configuration config, Action saveConfig)
+    public Stage2InventoryToDresser(ExcelIndex excel, InventoryScanner scanner, OutfitCatalog outfits, IGameGui gameGui, Configuration config, System.Action saveConfig)
     {
         this.excel = excel;
         this.scanner = scanner;
@@ -884,7 +884,7 @@ public sealed unsafe class Stage3ArmoryToInventory
 {
     private readonly InventoryScanner scanner;
     private readonly Configuration config;
-    private readonly Action saveConfig;
+    private readonly System.Action saveConfig;
     private readonly List<PhysicalGearEntry> entries = [];
     private readonly HashSet<ItemLocationKey> selected = [];
     private readonly Queue<PhysicalGearEntry> queue = new();
@@ -899,7 +899,7 @@ public sealed unsafe class Stage3ArmoryToInventory
     public string Status { get; private set; } = "장비함 후보를 검색해 주세요.";
     public string? LastItemStatus { get; private set; }
 
-    public Stage3ArmoryToInventory(InventoryScanner scanner, Configuration config, Action saveConfig)
+    public Stage3ArmoryToInventory(InventoryScanner scanner, Configuration config, System.Action saveConfig)
     {
         this.scanner = scanner;
         this.config = config;
