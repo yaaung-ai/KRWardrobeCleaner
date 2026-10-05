@@ -218,6 +218,12 @@ public sealed unsafe class Stage1DresserToInventory
             return 0;
         }
 
+        if (!glamourCache.HasPlateData)
+        {
+            Status = "투영세트 등록 여부를 판정하려면 투영세트 편집 화면을 한 번 열어 캐시한 뒤 다시 검색해 주세요.";
+            return 0;
+        }
+
         for (var slot = 0; slot < manager->PrismBoxItemIds.Length; slot++)
         {
             var raw = manager->PrismBoxItemIds[slot];
@@ -1179,7 +1185,7 @@ public sealed unsafe class Stage4Discard
             if (yesno == null || !yesno->AtkUnitBase.IsVisible)
                 continue;
 
-            var prompt = yesno->PromptText?.NodeText.ToString() ?? string.Empty;
+            var prompt = yesno->PromptText == null ? string.Empty : yesno->PromptText->NodeText.ToString();
             if (!string.IsNullOrWhiteSpace(prompt) &&
                 !prompt.Contains(expected.Name, StringComparison.OrdinalIgnoreCase))
                 continue;
